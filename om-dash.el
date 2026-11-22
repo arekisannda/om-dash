@@ -64,10 +64,10 @@
 
 ;;; Code:
 
+(require 'auth-source)
 (require 'cl-lib)
 (require 'imap)
 (require 'json)
-(require 'netrc)
 (require 'org)
 (require 'seq)
 
@@ -2596,7 +2596,7 @@ is a format string where `%s' can be used for entry title."
       (let* ((machine (if (s-present-p machine)
                           machine
                         host))
-             (credentials (netrc-credentials machine)))
+             (credentials (auth-source-user-and-password machine)))
         (unless credentials
           (error "Om-dash: machine %s not found in ~/.authinfo" machine))
         (unless (s-present-p user)
