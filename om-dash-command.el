@@ -130,8 +130,7 @@ from https://github.com/mrc/el-csv"
       (om-dash--insert-heading (or keyword
                                    (om-dash--choose-keyword is-todo))
                                headline heading-level)
-      (when table
-        (om-dash--insert-table columns table heading-level))
+      (om-dash--insert-table columns table heading-level)
       (om-dash--remove-empty-line))))
 
 ;;;###autoload
@@ -230,8 +229,7 @@ Example function that returns a single 2x2 table:
                                    heading-level)
           (when multiple
             (om-dash--insert-caption keyword headline))
-          (when table
-            (om-dash--insert-table column-names (nreverse table) heading-level))))
+          (om-dash--insert-table column-names (nreverse table) heading-level)))
       (om-dash--remove-empty-line))))
 
 (provide 'om-dash-command)

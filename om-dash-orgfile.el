@@ -452,7 +452,9 @@ is a format string where `%s' can be used for entry title."
                           (_ (user-error "Om-dash: unknown table column %S" col))))
                       table-columns)
              table)))))
-      (when table
+      ;; with :digest, the single table is generated even without entries;
+      ;; without :digest, a top-level entry without rows stays collapsed
+      (when (or table digest)
         (om-dash--insert-table column-names (nreverse table) heading-level))
       (om-dash--remove-empty-line))))
 

@@ -348,8 +348,7 @@ and `login' values to force plain-text unencrypted password."
                                    (om-dash--choose-keyword todo-p))
                                headline
                                heading-level)
-      (when table
-        (om-dash--insert-table column-names (nreverse table) heading-level))
+      (om-dash--insert-table column-names (nreverse table) heading-level)
       (om-dash--remove-empty-line))))
 
 (provide 'om-dash-imap)

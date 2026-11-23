@@ -1819,11 +1819,10 @@ parameter explicitly."
       (om-dash--insert-heading (or keyword
                                    (om-dash--choose-keyword todo-p))
                                headline heading-level)
-      (when table
-        (om-dash--insert-table column-names
-                               (seq-map #'cdr table)
-                               heading-level
-                               (when group-by (seq-map #'car table))))
+      (om-dash--insert-table column-names
+                             (seq-map #'cdr table)
+                             heading-level
+                             (when group-by (seq-map #'car table)))
       (om-dash--remove-empty-line))))
 
 (defun om-dash-github:milestone (params)

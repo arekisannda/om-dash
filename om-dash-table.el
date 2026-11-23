@@ -180,7 +180,8 @@ with the block they belong to."
 (defun om-dash--insert-table (column-names rows level &optional groups)
   "Generate table from column names and list of rows.
 If GROUPS is non-nil, it's a list of group keys, one per row; a ruler
-is inserted between rows whose group keys differ."
+is inserted between rows whose group keys differ.
+If ROWS is nil, only the header is generated, with all columns."
   (let* (;; index of column to stretch - by default last one
          (stretch-col (1- (length column-names)))
          ;; list of pairs ("title" . length)
@@ -196,7 +197,8 @@ is inserted between rows whose group keys differ."
                      (cons name (length name)))
                    column-names)))
     ;; squeeze - remove empty columns
-    (when om-dash-table-squeeze-empty
+    ;; (without rows, every column is empty, so keep them all)
+    (when (and om-dash-table-squeeze-empty rows)
       (let ((col-count (length columns)))
         (dotimes (idx col-count)
           (let ((col-num (- col-count idx 1)))
@@ -257,6 +259,8 @@ is inserted between rows whose group keys differ."
         (om-dash--insert-indent level)
         (om-dash--insert-row columns row)))
     ;; |--------|
+    ;; (also without rows, so that there's a place to insert rows,
+    ;; e.g. with `org-table-insert-row')
     (om-dash--insert-indent level)
     (om-dash--insert-ruler columns)))
 
