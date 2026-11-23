@@ -21,7 +21,7 @@
 
 ;; Commands operating on the topic on the current table row: set
 ;; project status, close/reopen, create from a new row, edit body,
-;; labels and assignees.
+;; labels and assignees, remove from project or delete.
 
 ;;; Code:
 
@@ -59,14 +59,19 @@ included in the error message if gh fails."
 (defun om-dash--github-project-item (url number owner status-field)
   "Find project item for topic URL in v2 project NUMBER owned by OWNER.
 Returns alist with keys `item-id', `project-id', `field-id', and
-`options' (list of (NAME . OPTION-ID)) for single-select STATUS-FIELD."
+`options' (list of (NAME . OPTION-ID)) for single-select STATUS-FIELD.
+If STATUS-FIELD is nil, the field is not looked up, and `field-id' and
+`options' are nil."
   (let* ((project-fields
-          (format (s-concat
-                   "project { id number title "
-                   "owner { ... on User { login } ... on Organization { login } } "
-                   "field(name: \"%s\") { ... on ProjectV2SingleSelectField "
-                   "{ id options { id name } } } }")
-                  (om-dash--gh-quote-arg status-field)))
+          (s-concat
+           "project { id number title "
+           "owner { ... on User { login } ... on Organization { login } } "
+           (if status-field
+               (format (s-concat "field(name: \"%s\") { ... on ProjectV2SingleSelectField "
+                                 "{ id options { id name } } } ")
+                       (om-dash--gh-quote-arg status-field))
+             "")
+           "}"))
          ;; draft issues have no url of their own; om-dash puts item node id
          ;; into url fragment, e.g. “...?pane=issue&itemId=1#om-dash-item=PVTI_x“
          (item-id (when (string-match "#om-dash-item=\\([^&#]+\\)" url)
@@ -104,9 +109,10 @@ Returns alist with keys `item-id', `project-id', `field-id', and
                                  (equal .project.owner.login owner)))))
                     nodes)
                    (user-error "Om-dash: %s is not in project %s" url number)))
-         (field (or (let-alist item .project.field)
-                    (user-error "Om-dash: project has no single-select field %S"
-                                status-field))))
+         (field (when status-field
+                  (or (let-alist item .project.field)
+                      (user-error "Om-dash: project has no single-select field %S"
+                                  status-field)))))
     (list (cons 'item-id (alist-get 'id item))
           (cons 'project-id (let-alist item .project.id))
           (cons 'field-id (alist-get 'id field))
@@ -714,6 +720,97 @@ Then “assignee“ cell of the row is updated (the block is not refreshed)."
                                                desired)))))
       (message "Om-dash: assignees of %s: %s" url
                (if desired (s-join ", " desired) "none")))))
+
+;;; Deleting items
+
+(defun om-dash--github-delete-row (marker)
+  "Delete table row at MARKER (the block is not refreshed)."
+  (with-current-buffer (marker-buffer marker)
+    (save-excursion
+      (goto-char marker)
+      (beginning-of-line)
+      (when (org-at-table-p)
+        (delete-region (point) (min (point-max) (1+ (line-end-position))))))))
+
+;;;###autoload
+(defun om-dash-github-delete-item (&optional arg)
+  "Remove the item on the current row from the project, or delete it.
+
+The item is taken from the first link on the row of a table generated
+by `om-dash-github' block.
+
+Without prefix ARG, the issue, pull request or draft is removed from
+the block's v2 project (`:project' with `:owner' or `:repo').  The
+issue or pull request itself is kept.  A draft issue exists only in
+the project, so removing it deletes it permanently; this is always
+confirmed by typing “yes“.
+
+With prefix ARG, the issue is deleted permanently (“gh issue delete“).
+This needs admin permission on the repository.  It is always confirmed
+by typing the issue number, even if `om-dash-github-confirm-changes'
+is nil.  Pull requests can't be deleted.  For drafts, prefix ARG makes
+no difference.
+
+Github needs some time until listings reflect the change, so the block
+is not refreshed.  In project mode (no `:repo'), the row is deleted
+from the table.  In repo mode, the item is still listed, so the row
+is kept; refresh the block later to update it.
+
+Requires “project“ token scope for removing from project:
+
+  gh auth refresh -s project"
+  (interactive "P")
+  (let* ((target (om-dash--github-row-target))
+         (kind (plist-get target :kind))
+         (url (plist-get target :url))
+         (marker (point-marker)))
+    (cond
+     ;; permanent deletion of issue
+     ((and arg (eq kind 'issue))
+      (let ((number (when (string-match "/issues/\\([0-9]+\\)" url)
+                      (match-string 1 url))))
+        (unless (equal (s-trim (read-string
+                                (format "Permanently delete %s?  Type issue number to confirm: "
+                                        url)))
+                       number)
+          (user-error "Om-dash: cancelled"))
+        (om-dash--gh-call "issue" "delete" url "--yes")
+        (om-dash--github-delete-row marker)
+        (message "Om-dash: deleted %s" url)))
+     ((and arg (eq kind 'pr))
+      (user-error "Om-dash: pull requests can't be deleted; close it instead"))
+     ;; removal from project (permanent deletion for drafts)
+     (t
+      (let* ((params (or (om-dash--block-params "om-dash-github")
+                         (user-error "Om-dash: not inside om-dash-github block")))
+             (project (or (om-dash--github-block-project params)
+                          (user-error
+                           (if (eq kind 'issue)
+                               "Om-dash: block has no v2 project (:project); with C-u, the issue is deleted permanently"
+                             "Om-dash: block has no v2 project (:project)"))))
+             (project-mode (not (plist-get params :repo)))
+             (item (om-dash--github-project-item url (cdr project) (car project) nil))
+             (project-name (format "project %s/%s" (car project) (cdr project))))
+        (if (eq kind 'draft)
+            (let ((title (alist-get 'title (om-dash--github-draft-info
+                                            (plist-get target :item-id)))))
+              (unless (yes-or-no-p (format "Permanently delete draft %S from %s? "
+                                           title project-name))
+                (user-error "Om-dash: cancelled")))
+          (om-dash--github-confirm (format "Remove from %s:" project-name) url))
+        (om-dash--gh-call "project" "item-delete"
+                          (format "%s" (cdr project))
+                          "--owner" (car project)
+                          "--id" (alist-get 'item-id item))
+        (if project-mode
+            (progn
+              (om-dash--github-delete-row marker)
+              (message "Om-dash: %s from %s"
+                       (if (eq kind 'draft) "deleted draft" (format "removed %s" url))
+                       project-name))
+          (message "Om-dash: removed %s from %s (refresh block later to update it)"
+                   url project-name)))))))
+
 ;;; Key bindings
 
 ;; github commands in `om-dash-command-map' (prefix `om-dash-mode-prefix-key')
@@ -726,6 +823,7 @@ Then “assignee“ cell of the row is updated (the block is not refreshed)."
 (define-key om-dash-command-map (kbd "e") #'om-dash-github-edit-body)
 (define-key om-dash-command-map (kbd "l") #'om-dash-github-edit-labels)
 (define-key om-dash-command-map (kbd "A") #'om-dash-github-edit-assignees)
+(define-key om-dash-command-map (kbd "d") #'om-dash-github-delete-item)
 
 (provide 'om-dash-github-commands)
 ;;; om-dash-github-commands.el ends here

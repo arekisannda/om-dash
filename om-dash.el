@@ -52,6 +52,8 @@
 ;; create a topic from a new row typed into the table.
 ;; Commands `om-dash-github-edit-body', `om-dash-github-edit-labels', and
 ;; `om-dash-github-edit-assignees' edit the topic on the current row.
+;; Command `om-dash-github-delete-item' removes it from the project, or
+;; with prefix argument deletes the issue permanently.
 
 ;; Block parameters can be given inline on the “#+BEGIN:“ line, or in
 ;; property drawers of enclosing headings, which allows to share common
