@@ -221,7 +221,7 @@ If nil, empty folders are excluded from the table."
 
 ;;;###autoload
 (defun org-dblock-write:om-dash-imap (params)
-  "Builds org heading with a table of IMAP folder(s) and their unread mail counters.
+  "Builds org heading with a table of IMAP folders and their unread counters.
 
 Usage example:
   #+BEGIN: om-dash-imap :folder “foo/bar“
@@ -229,41 +229,57 @@ Usage example:
   #+END:
 
 Custom config:
-  #+BEGIN: om-dash-imap :folder “foo/bar“ :server (:host “example.com“ :user “john“ :password “secret“)
+  #+BEGIN: om-dash-imap :folder “foo/bar“ :server (:host “example.com“)
   ...
   #+END:
 
-| parameter      | default                       | description                       |
-|----------------+-------------------------------+-----------------------------------|
-| :server        | `om-dash-imap-default-server' | server connection config          |
-| :columns       | `om-dash-imap-columns'        | list of columns to display        |
-| :keyword       | auto                          | keyword of OM_DASH_HEADING        |
-| :headline      | auto                          | caption of multi-table blocks     |
-| :heading-level | auto                          | unused                            |
+`:server' can also contain credentials, e.g.:
+  :server (:host “example.com“ :user “john“ :password “secret“)
 
-`:server' defines IMAP connection parameters.  It must be a `plist' which can have
-the following properties:
+Parameters:
 
-| property  | default                            | description                 |
-|-----------+------------------------------------+-----------------------------|
-| :host     | required                           | IMAP server hostmame        |
-| :port     | auto                               | IMAP server port            |
-| :machine  | same as `:host'                    | machine name in ~/.authinfo |
-| :user     | match in ~/.authinfo by `:machine' | IMAP username               |
-| :password | match in ~/.authinfo by `:machine' | IMAP password               |
-| :stream   | auto                               | STREAM arg for `imap-open'  |
-| :auth     | auto                               | AUTH arg for `imap-open'    |
+  :server         Server connection config.
+                  Default: `om-dash-imap-default-server'.
+  :columns        List of columns to display.
+                  Default: `om-dash-imap-columns'.
+  :keyword        Keyword of OM_DASH_HEADING.
+                  Default: auto.
+  :headline       Caption of multi-table blocks.
+                  Default: auto.
+  :heading-level  Unused.
+                  Default: auto.
 
-If you omit `:server', or some of the properties, their values are substituted with
-the corresponding fields from `om-dash-imap-default-server', when present.
+`:server' defines IMAP connection parameters.  It must be a `plist' which
+can have the following properties:
+
+  :host       IMAP server hostmame.
+              Required.
+  :port       IMAP server port.
+              Default: auto.
+  :machine    Machine name in ~/.authinfo.
+              Default: same as `:host'.
+  :user       IMAP username.
+              Default: match in ~/.authinfo by `:machine'.
+  :password   IMAP password.
+              Default: match in ~/.authinfo by `:machine'.
+  :stream     STREAM arg for `imap-open'.
+              Default: auto.
+  :auth       AUTH arg for `imap-open'.
+              Default: auto.
+
+If you omit `:server', or some of the properties, their values are
+substituted with the corresponding fields from
+`om-dash-imap-default-server', when present.
 
 `:host' and `:port' define IMAP server address.
-Host must be always set, either via `:server' or `om-dash-imap-default-server'.
+Host must be always set, either via `:server' or
+`om-dash-imap-default-server'.
 Port is optional, default value depends on `:auth' method.
 
 `:user' and `:password' define IMAP credentials.
-If not set, `om-dash-imap' will find them in ~/.authinfo by matching by `:machine'
-property.  If `:machine' isn't set, `:host' value is used for matching.
+If not set, `om-dash-imap' will find them in ~/.authinfo by matching by
+`:machine' property.  If `:machine' isn't set, `:host' value is used for
+matching.
 
 `:stream' and `:auth' may be used to force `imap-open' to use specific
 connection and authentification types.  For example, you can use `network'

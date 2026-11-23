@@ -1332,51 +1332,68 @@ Basic example:
   ...
   #+END:
 
-More complicated query using simple syntax:
+More complicated query using simple syntax (as `:open' value, other
+parameters as in the basic example):
 
-  #+BEGIN: om-dash-github :repo “owner/repo“ :type pullreq :open (:milestone “1.2.3“ :label “blocker“ :no-label “triage“)
-  ...
-  #+END:
+  :open (:milestone “1.2.3“ :label “blocker“ :no-label “triage“)
 
 Same query but by providing github search query and jq selector:
 
-  #+BEGIN: om-dash-github :repo “owner/repo“ :type pullreq :open (“milestone:1.2.3 label:blocker“ “.labels | (.name == \\“triage\\“) | not“)
-  ...
-  #+END:
+  :open (“milestone:1.2.3 label:blocker“
+         “.labels | (.name == \\“triage\\“) | not“)
+
+\(In a block, the whole `:open' value goes on the “#+BEGIN:“ line.)
 
 Items of a v2 project, from any repo (no :repo needed):
 
-  #+BEGIN: om-dash-github :owner “octocat“ :project 7 :type pullreq :open “*“ :closed “-1w“
+  #+BEGIN: om-dash-github :owner “octocat“ :project 7 :type pullreq :open “*“
   ...
   #+END:
 
 Parameters:
 
-| parameter             | default                               | description                             |
-|-----------------------+---------------------------------------+-----------------------------------------|
-| :repo                 | required unless :owner and :project   | github repo in form “<owner>/<repo>“    |
-| :owner                | owner part of :repo                   | user, org or “@me“ owning the project   |
-| :project              | nil                                   | v2 project number (project mode)        |
-| :owner-type           | auto                                  | `user' or `org' (skips auto-detection)  |
-| :project-status-field | `om-dash-github-project-status-field' | project field used as status            |
-| :type                 | required                              | topic type (`issue', `pullreq', `any')  |
-| :any                  | see below                             | query for topics in any state           |
-| :open                 | see below                             | query for topics in open state          |
-| :closed               | see below                             | query for topics in closed state        |
-| :sort                 | “createdAt“                           | sort results by field, “-field“ = desc  |
-| :group-by             | nil                                   | column to group rows by, e.g. `:repo'   |
-| :group-order          | `asc'                                 | group order: `asc', `desc', `sort'      |
-| :sub-issues           | `nest'                                | `nest' sub-issues under parent, `flat'  |
-| :fields               | `om-dash-github-fields'               | explicitly specify list of fields       |
-| :limit                | `om-dash-github-limit'                | limit number of results                 |
-| :columns              | `om-dash-github-columns'              | list of columns to display              |
-| :keyword              | auto                                  | keyword of OM_DASH_HEADING              |
-| :headline             | auto                                  | caption of multi-table blocks           |
-| :heading-level        | auto                                  | unused                                  |
+  :repo                  GitHub repo in form “<owner>/<repo>“.
+                         Required unless `:owner' and `:project' are given.
+  :owner                 User, org or “@me“ owning the project.
+                         Default: owner part of `:repo'.
+  :project               V2 project number (project mode).
+                         Default: nil.
+  :owner-type            `user' or `org' (skips auto-detection).
+                         Default: auto.
+  :project-status-field  Project field used as status.
+                         Default: `om-dash-github-project-status-field'.
+  :type                  Topic type: `issue', `pullreq', or `any'.
+                         Required.
+  :any                   Query for topics in any state.
+                         Default: see below.
+  :open                  Query for topics in open state.
+                         Default: see below.
+  :closed                Query for topics in closed state.
+                         Default: see below.
+  :sort                  Sort results by field, “-field“ = descending.
+                         Default: “createdAt“.
+  :group-by              Column to group rows by, e.g. `:repo'.
+                         Default: nil.
+  :group-order           Group order: `asc', `desc', or `sort'.
+                         Default: `asc'.
+  :sub-issues            `nest' sub-issues under parent, or `flat'.
+                         Default: `nest'.
+  :fields                Explicitly specify list of fields.
+                         Default: `om-dash-github-fields'.
+  :limit                 Limit number of results.
+                         Default: `om-dash-github-limit'.
+  :columns               List of columns to display.
+                         Default: `om-dash-github-columns'.
+  :keyword               Keyword of OM_DASH_HEADING.
+                         Default: auto.
+  :headline              Caption of multi-table blocks.
+                         Default: auto.
+  :heading-level         Unused.
+                         Default: auto.
 
-Parameters `:any', `:open', and `:closed' define `QUERY' for topics in corresponding
-states.  You should specify either `:any' or `:open' and/or `:close'.  Not specifying
-anything is equavalent to :open “*“.
+Parameters `:any', `:open', and `:closed' define `QUERY' for topics in
+corresponding states.  You should specify either `:any' or `:open' and/or
+`:close'.  Not specifying anything is equavalent to :open “*“.
 
 `QUERY' can have one of the following forms:
 
@@ -1391,8 +1408,8 @@ anything is equavalent to :open “*“.
  - list: two-element list with `GITHUB-QUERY' and `JQ-SELECTOR' strings, e.g.:
      (“milestone:1.2.3“ “.author.login != “bob“)
 
-You can specify different queries for `:open' and `:closed' topics, e.g. to show all
-open issues but only recently closed issues, use:
+You can specify different queries for `:open' and `:closed' topics, e.g.
+to show all open issues but only recently closed issues, use:
 
   :open “*“ :closed “-1mo“
 
@@ -1403,29 +1420,29 @@ Or you can use a single query regardless of topic state:
 `SIMPLE-QUERY' format is a convenient way to build queries for some typical
 use cases.  The query should be a `plist' with the following properties:
 
-| property           | description                                              |
-|--------------------+----------------------------------------------------------|
-| :milestone         | include only topics with any of given milestone(s)       |
-| :no-milestone      | exclude topics with any of given milestone(s)            |
-| :label             | include only topics with any of given label(s)           |
-| :every-label       | include only topics with all of given label(s)           |
-| :no-label          | exclude topics with any of given label(s)                |
-| :author            | include only topics with any of given author(s)          |
-| :no-author         | exclude topics with any of given author(s)               |
-| :assignee          | include only topics with any of given assignee(s)        |
-| :no-assignee       | exclude topics with any of given assignee(s)             |
-| :reviewer          | include only topics with any of given reviewer(s)        |
-| :no-reviewer       | exclude topics with any of given reviewer(s)             |
-| :review-status     | include only topics with any of given review status(es)  |
-| :no-review-status  | exclude topics with any of given review status(es)       |
-| :project           | include only topics added to given project               |
-| :project-type      | choose between v2 and classic project                    |
-| :project-status    | include only topics with any of given project status(es) |
-| :no-project-status | exclude topics with any of given project status(es)      |
-| :created-at        | include only topics created within given date range      |
-| :updated-at        | include only topics updated within given date range      |
-| :closed-at         | include only topics closed within given date range       |
-| :merged-at         | include only topics merged within given date range       |
+  :milestone          Include only topics with any of given milestone(s).
+  :no-milestone       Exclude topics with any of given milestone(s).
+  :label              Include only topics with any of given label(s).
+  :every-label        Include only topics with all of given label(s).
+  :no-label           Exclude topics with any of given label(s).
+  :author             Include only topics with any of given author(s).
+  :no-author          Exclude topics with any of given author(s).
+  :assignee           Include only topics with any of given assignee(s).
+  :no-assignee        Exclude topics with any of given assignee(s).
+  :reviewer           Include only topics with any of given reviewer(s).
+  :no-reviewer        Exclude topics with any of given reviewer(s).
+  :review-status      Include only topics with any of given review
+                      status(es).
+  :no-review-status   Exclude topics with any of given review status(es).
+  :project            Include only topics added to given project.
+  :project-type       Choose between v2 and classic project.
+  :project-status     Include only topics with any of given project
+                      status(es).
+  :no-project-status  Exclude topics with any of given project status(es).
+  :created-at         Include only topics created within given date range.
+  :updated-at         Include only topics updated within given date range.
+  :closed-at          Include only topics closed within given date range.
+  :merged-at          Include only topics merged within given date range.
 
 All properties are optional (but at least one should be provided).  Multiple
 properties are ANDed, e.g. (:author “bob“ :label “bug“) matches topics with
@@ -1433,11 +1450,11 @@ author “bob“ AND label “bug“.  Most properties support list form, in whi
 its elements are ORed.  E.g. (:author (“bob“ “alice“) :label “bug“) matches
 topics with label “bug“ AND author either “bob“ OR “alice“.
 
-`:milestone', `:label', `:author', `:assignee', and `:reviewer' properties, as
-well as their `:no-xxx' counterparts, can be either a string (to match one value)
-or a list of strings (to match any value from the list).  Two special values are
-supported: “*“ matches if corresponding property (e.g. assignee) is non-empty,
-and “-“ matches if the property unset/empty.
+`:milestone', `:label', `:author', `:assignee', and `:reviewer' properties,
+as well as their `:no-xxx' counterparts, can be either a string (to match
+one value) or a list of strings (to match any value from the list).  Two
+special values are supported: “*“ matches if corresponding property
+\(e.g. assignee) is non-empty, and “-“ matches if the property unset/empty.
 
 Examples:
   :author “bob“
@@ -1452,40 +1469,42 @@ the labels from the list, instead of any label from list.
 
 Supported values:
 
-| status    | description                                                           |
-|-----------+-----------------------------------------------------------------------|
-| undecided | review not required, not requested, there're no approvals or rejects  |
-| required  | review is required by repo rules                                      |
-| requested | review is explicitly requested                                        |
-| commented | some reviewers commented without approval or rejection                |
-| approved  | all reviewers either approved or commented, and at least one approved |
-| rejected  | some reviewers requested changes or dismissed review                  |
+  undecided   Review not required, not requested, there're no approvals
+              or rejects.
+  required    Review is required by repo rules.
+  requested   Review is explicitly requested.
+  commented   Some reviewers commented without approval or rejection.
+  approved    All reviewers either approved or commented, and at least
+              one approved.
+  rejected    Some reviewers requested changes or dismissed review.
 
 Examples:
   :review-status (required requested)
   :review-status approved
   :no-review-status (approved rejected commented)
 
-GitHub review state model is complicated.  These statuses is an attempt to provide
-a simplified view of the review state for most common needs.
+GitHub review state model is complicated.  These statuses is an attempt to
+provide a simplified view of the review state for most common needs.
 
 Note that not all statuses are mutually exclusive, in particular `required' can
 co-exist with any status except `undecided', and `commented' can co-exist with
 any other status.  You can match multiple statuses by providing a list.
 
-`:project' defines numeric identifier of the `v2' or `classic' github project (you can
-see identifier in the url).  By default, `v2' is assumed, but you can change type
-using `:project-type' property.
+`:project' defines numeric identifier of the `v2' or `classic' github
+project (you can see identifier in the url).  By default, `v2' is assumed,
+but you can change type using `:project-type' property.
 
-`:project-status' can be a string or a list of strings.  For `v2' projects, it matches
-“status“ field of the project item, which corresponds to column name if board view of
-the project.  For `classic' projects, it matches “column“ property of the project card.
+`:project-status' can be a string or a list of strings.  For `v2'
+projects, it matches “status“ field of the project item, which corresponds
+to column name if board view of the project.  For `classic' projects, it
+matches “column“ property of the project card.
 
 Examples:
   :project 5 :project-status “In work“
   :project 2 :project-type classic :project-status (“Backlog“ “On hold“)
 
-`:created-at', `:updated-at', `:closed-at', `:merged-at' can have one of this forms:
+`:created-at', `:updated-at', `:closed-at', `:merged-at' can have one of
+this forms:
  - “TIMESTAMP“
  - (> “TIMESTAMP“)
  - (>= “TIMESTAMP“)
@@ -1495,32 +1514,30 @@ Examples:
 
 Supported `TIMESTAMP' formats:
 
-| format                      | description                 |
-|-----------------------------+-----------------------------|
-| “2024-02-20“                | date                        |
-| “2024-02-20T15:59:59Z“      | utc date and time           |
-| “2024-02-20T15:59:79+00:00“ | date and time with timezone |
-| “-10d“                      | 10 days before today        |
-| “-10w“                      | 10 weeks before today       |
-| “-10mo“                     | 10 months before today      |
-| “-10y“                      | 10 years before today       |
+  “2024-02-20“                 Date.
+  “2024-02-20T15:59:59Z“       UTC date and time.
+  “2024-02-20T15:59:79+00:00“  Date and time with timezone.
+  “-10d“                       10 days before today.
+  “-10w“                       10 weeks before today.
+  “-10mo“                      10 months before today.
+  “-10y“                       10 years before today.
 
 Examples:
   :created-at “2024-02-20“
   :updated-at (>= “-3mo“)
 
-`GITHUB-QUERY' is a string using github search syntax:
-https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests
+`GITHUB-QUERY' is a string using github search syntax, see “Searching
+issues and pull requests“ in:
+https://docs.github.com/en/search-github
 
-Besides standard syntax, a few extended forms are supported for github query:
+Besides standard syntax, a few extended forms are supported for github
+query:
 
-| form     | description                                     |
-|----------+-------------------------------------------------|
-| “*“      | match all topics                                |
-| “-123d“  | match if topic was updated during last 123 days |
-| “-123w“  | same, but weeks                                 |
-| “-123mo“ | same, but months                                |
-| “-123y“  | same, but years                                 |
+  “*“       Match all topics.
+  “-123d“   Match if topic was updated during last 123 days.
+  “-123w“   Same, but weeks.
+  “-123mo“  Same, but months.
+  “-123y“   Same, but years.
 
 `JQ-SELECTOR' is an optional selector to filter results using jq command:
 https://jqlang.github.io/jq/
@@ -1575,8 +1592,9 @@ Project mode:
 If `:repo' is omitted and both `:owner' and top-level `:project' are given,
 the block lists issues and pull requests added to that v2 project, from
 any repository.  `:owner' is the login from the project url
-\(github.com/users/<owner>/projects/<N> or github.com/orgs/<owner>/projects/<N>),
-or “@me“ for your own projects.  Requires “read:project“ token scope:
+\(github.com/users/<owner>/projects/<N> or
+github.com/orgs/<owner>/projects/<N>), or “@me“ for your own projects.
+Requires “read:project“ token scope:
 
   gh auth refresh -s read:project
 
@@ -1604,10 +1622,11 @@ Under the hood, this block uses combination of gh and jq commands like:
 Exact commands being executed are printed to `*om-dash*' buffer
 if `om-dash-verbose' is set.
 
-By default, github query uses all fields from `om-dash-github-fields', plus any
-field from `om-dash-github-auto-enabled-fields' if it's present in jq selector.
-The latter allows to exclude fields that makes queries slower, when they're
-not used.  To change this, you can specify `:fields' parameter explicitly."
+By default, github query uses all fields from `om-dash-github-fields',
+plus any field from `om-dash-github-auto-enabled-fields' if it's present
+in jq selector.  The latter allows to exclude fields that makes queries
+slower, when they're not used.  To change this, you can specify `:fields'
+parameter explicitly."
   ;; expand template
   (setq params
         (om-dash--prepare-params params))

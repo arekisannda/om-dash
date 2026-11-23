@@ -244,7 +244,13 @@ Supported values:
 
 Basic usage:
 
-  #+BEGIN: om-dash-orgfile :file “~/my/file.org“ :query (:todo-depth 2 :done-depth 1)
+  #+BEGIN: om-dash-orgfile :file “~/my/file.org“
+  ...
+  #+END:
+
+Custom simple query:
+
+  #+BEGIN: om-dash-orgfile :file “~/my/file.org“ :query (:todo-depth 3)
   ...
   #+END:
 
@@ -256,15 +262,20 @@ Custom org-ql query:
 
 Parameters:
 
-| parameter      | default                       | description                            |
-|----------------+-------------------------------+----------------------------------------|
-| :file          | required                      | path to .org file                      |
-| :query         | (:todo-depth 2 :done-depth 1) | query for org entries                  |
-| :digest        | nil                           | generate single table with all entries |
-| :columns       | `om-dash-orgfile-columns'     | list of columns to display             |
-| :keyword       | auto                          | keyword of OM_DASH_HEADING             |
-| :headline      | auto                          | caption of multi-table blocks          |
-| :heading-level | auto                          | unused                                 |
+  :file           Path to .org file.
+                  Required.
+  :query          Query for org entries.
+                  Default: (:todo-depth 2 :done-depth 1).
+  :digest         Generate single table with all entries.
+                  Default: nil.
+  :columns        List of columns to display.
+                  Default: `om-dash-orgfile-columns'.
+  :keyword        Keyword of OM_DASH_HEADING.
+                  Default: auto.
+  :headline       Caption of multi-table blocks.
+                  Default: auto.
+  :heading-level  Unused.
+                  Default: auto.
 
 By default, this block generates an org heading with a table for every
 top-level (i.e. level-1) org heading in specified `:file', with nested
@@ -282,19 +293,28 @@ It should have one of the following forms:
 `SIMPLE-QUERY' format is a convenient way to build queries for some typical
 use cases.  The query should be a `plist' with the following properties:
 
-| property     | default | description                                          |
-|--------------+---------+------------------------------------------------------|
-| :todo-depth  | 2       | nesting level for “todo“ entries                     |
-| :done-depth  | 1       | nesting level for “done“ entries                     |
-| :category    | nil     | include only entries with any of given category(ies) |
-| :no-category | nil     | exclide entries with any of given category(ies)      |
-| :priority    | nil     | include only entries with any of given priority(ies) |
-| :no-priority | nil     | exclide entries with any of given priority(ies)      |
-| :tag         | nil     | include only entries with any of given tag(s)        |
-| :every-tag   | nil     | include only entries with all of given tag(s)        |
-| :no-tag      | nil     | exclide entries with any of given tag(s)             |
-| :blocked     | any     | whether to include blocked entries                   |
-| :habit       | any     | whether to include habit entries                     |
+  :todo-depth   Nesting level for “todo“ entries.
+                Default: 2.
+  :done-depth   Nesting level for “done“ entries.
+                Default: 1.
+  :category     Include only entries with any of given category(ies).
+                Default: nil.
+  :no-category  Exclude entries with any of given category(ies).
+                Default: nil.
+  :priority     Include only entries with any of given priority(ies).
+                Default: nil.
+  :no-priority  Exclude entries with any of given priority(ies).
+                Default: nil.
+  :tag          Include only entries with any of given tag(s).
+                Default: nil.
+  :every-tag    Include only entries with all of given tag(s).
+                Default: nil.
+  :no-tag       Exclude entries with any of given tag(s).
+                Default: nil.
+  :blocked      Whether to include blocked entries.
+                Default: `any'.
+  :habit        Whether to include habit entries.
+                Default: `any'.
 
 Properties `:todo-depth' and `:done-depth' limit how deep the tree is
 traversed for top-level headings in “todo“ and “done“ states.
@@ -331,8 +351,9 @@ Examples:
 `:every-tag' is similar to `:tag', but it matches entries that have all of
 the tags from the list, instead of any tag from list.
 
-`:blocked' and `:habit' properties should be one of the three symbols: `any'
-\(ignore type), `yes' (include only entries of this type), `no' (exclude entries).
+`:blocked' and `:habit' properties should be one of the three symbols:
+`any' (ignore type), `yes' (include only entries of this type), `no'
+\(exclude entries).
 
 For `ORG-QL' sexp and string queries, see here:
 https://github.com/alphapapa/org-ql?tab=readme-ov-file#queries

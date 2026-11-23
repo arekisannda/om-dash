@@ -143,28 +143,37 @@ Usage example:
   ...
   #+END:
 
-| parameter      | default  | description                       |
-|----------------+----------+-----------------------------------|
-| :func          | required | elisp function to call            |
-| :args          | nil      | optional function arguments       |
-| :columns       | nil      | list of columns to display        |
-| :keyword       | nil      | keyword of OM_DASH_HEADING        |
-| :headline      | nil      | caption of multi-table blocks     |
-| :heading-level | nil      | unused                            |
+Parameters:
+
+  :func           Elisp function to call.
+                  Required.
+  :args           Optional function arguments.
+                  Default: nil.
+  :columns        List of columns to display.
+                  Default: nil.
+  :keyword        Keyword of OM_DASH_HEADING.
+                  Default: nil.
+  :headline       Caption of multi-table blocks.
+                  Default: nil.
+  :heading-level  Unused.
+                  Default: nil.
 
 The function should return a list of tables, where each table is
 a `plist' with the following properties:
 
-| property       | default  | description                                          |
-|----------------+----------+------------------------------------------------------|
-| :columns       | required | list of column names (strings)                       |
-| :data          | required | list of rows, where row is a list of cells (strings) |
-| :keyword       | “TODO“   | keyword of OM_DASH_HEADING                           |
-| :headline      | auto     | caption of multi-table blocks                        |
-| :heading-level | auto     | unused                                               |
+  :columns        List of column names (strings).
+                  Required.
+  :data           List of rows, where row is a list of cells (strings).
+                  Required.
+  :keyword        Keyword of OM_DASH_HEADING.
+                  Default: “TODO“.
+  :headline       Caption of multi-table blocks.
+                  Default: auto.
+  :heading-level  Unused.
+                  Default: auto.
 
-Every property returned from function, except `:data', may be overwritten by a block
-parameter with the same name, if it is provided.
+Every property returned from function, except `:data', may be overwritten
+by a block parameter with the same name, if it is provided.
 
 Example function that returns a single 2x2 table:
 
