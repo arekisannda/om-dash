@@ -48,6 +48,8 @@
 ;; (e.g. Todo / In Progress) of the issue or pull request at point.
 ;; Commands `om-dash-github-close-topic', `om-dash-github-reopen-topic',
 ;; and `om-dash-github-toggle-topic-state' close or reopen it.
+;; Commands `om-dash-github-create-issue' and `om-dash-github-create-draft'
+;; create a topic from a new row typed into the table.
 
 ;; Block parameters can be given inline on the “#+BEGIN:“ line, or in
 ;; property drawers of enclosing headings, which allows to share common
@@ -3809,12 +3811,23 @@ Example function that returns a single 2x2 table:
       (om-dash--remove-empty-line))))
 
 (defun om-dash--gh-call (&rest args)
-  "Run gh with ARGS (no shell), return stdout or signal `user-error'."
+  "Run gh with ARGS (no shell), return stdout or signal `user-error'.
+Stderr is kept separately (so that stdout can be parsed), and is
+included in the error message if gh fails."
   (om-dash--log (s-join " " (cons "gh" (seq-map #'om-dash--shell-quote args))))
-  (with-temp-buffer
-    (unless (zerop (apply #'call-process "gh" nil t nil args))
-      (user-error "Om-dash: gh failed: %s" (s-trim (buffer-string))))
-    (buffer-string)))
+  (let ((stderr-file (make-temp-file "om-dash-stderr-")))
+    (unwind-protect
+        (with-temp-buffer
+          (let ((status (apply #'call-process "gh" nil (list t stderr-file) nil args)))
+            (unless (eq status 0)
+              (user-error "Om-dash: gh failed: %s"
+                          (s-trim (concat (with-temp-buffer
+                                            (insert-file-contents stderr-file)
+                                            (buffer-string))
+                                          " "
+                                          (buffer-string)))))
+            (buffer-string)))
+      (delete-file stderr-file))))
 
 (defun om-dash--row-link ()
   "Return target of the first org link on the current line, or nil."
@@ -3964,7 +3977,7 @@ Requires “project“ token scope:
       (org-dblock-update))))
 
 (defcustom om-dash-github-confirm-changes t
-  "If non-nil, ask for confirmation before closing or reopening topics."
+  "If non-nil, ask for confirmation before creating, closing or reopening topics."
   :package-version '(om-dash . "0.7")
   :group 'om-dash
   :type 'boolean)
@@ -4056,6 +4069,388 @@ reopened.  Prefix ARG is passed to `om-dash-github-close-topic' or
       ("CLOSED" (om-dash-github-reopen-topic arg))
       ("MERGED" (user-error "Om-dash: %s is merged and can't be reopened" url))
       (_ (user-error "Om-dash: unknown state %S of %s" state url)))))
+
+;;; Editing buffer (C-c C-c to submit, C-c C-k to cancel)
+
+(defvar-local om-dash--edit-callback nil
+  "Function called with buffer text when editing is submitted.")
+
+(defvar-local om-dash--edit-window-config nil
+  "Window configuration to restore when editing is finished.")
+
+(defun om-dash-edit-submit ()
+  "Submit text of the om-dash editing buffer."
+  (interactive)
+  (let ((callback om-dash--edit-callback)
+        (config om-dash--edit-window-config)
+        (text (buffer-substring-no-properties (point-min) (point-max))))
+    (kill-buffer)
+    (when config
+      (set-window-configuration config))
+    (funcall callback text)))
+
+(defun om-dash-edit-cancel ()
+  "Cancel editing in the om-dash editing buffer."
+  (interactive)
+  (let ((config om-dash--edit-window-config))
+    (kill-buffer)
+    (when config
+      (set-window-configuration config))
+    (message "Om-dash: cancelled")))
+
+(defvar om-dash-edit-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'om-dash-edit-submit)
+    (define-key map (kbd "C-c C-k") #'om-dash-edit-cancel)
+    map)
+  "Keymap for `om-dash-edit-mode'.")
+
+(define-minor-mode om-dash-edit-mode
+  "Minor mode for om-dash editing buffers.
+\\<om-dash-edit-mode-map>\\[om-dash-edit-submit] submits, \\[om-dash-edit-cancel] cancels."
+  :lighter " OM-Edit"
+  :keymap om-dash-edit-mode-map)
+
+(defun om-dash--edit-text (description initial callback)
+  "Pop up a buffer to edit text, then call CALLBACK with the result.
+DESCRIPTION is shown in the header line, INITIAL is initial text.
+Uses `markdown-mode' if available (github bodies are markdown)."
+  (let ((config (current-window-configuration))
+        (buffer (generate-new-buffer "*om-dash-edit*")))
+    (with-current-buffer buffer
+      (if (fboundp 'markdown-mode)
+          (markdown-mode)
+        (text-mode))
+      (insert (or initial ""))
+      (goto-char (point-min))
+      (om-dash-edit-mode 1)
+      (setq om-dash--edit-callback callback
+            om-dash--edit-window-config config
+            header-line-format
+            (substitute-command-keys
+             (format "%s  \\<om-dash-edit-mode-map>(\\[om-dash-edit-submit] submit, \\[om-dash-edit-cancel] cancel)"
+                     description))))
+    (pop-to-buffer buffer)))
+
+;;; Reading table rows
+
+(defun om-dash--table-split-line (line)
+  "Split table LINE into list of trimmed cell texts (links -> descriptions)."
+  (seq-map (lambda (cell)
+             (s-trim (org-link-display-format cell)))
+           (butlast (cdr (split-string line "|")))))
+
+(defun om-dash--table-header ()
+  "Return list of header names of the table at point."
+  (save-excursion
+    (goto-char (org-table-begin))
+    (while (and (org-at-table-p) (org-at-table-hline-p))
+      (forward-line 1))
+    (om-dash--table-split-line
+     (buffer-substring-no-properties (line-beginning-position)
+                                     (line-end-position)))))
+
+(defun om-dash--table-row-values ()
+  "Return alist of (HEADER . TEXT) for the table row at point."
+  (unless (org-at-table-p)
+    (user-error "Om-dash: not in a table"))
+  (when (org-at-table-hline-p)
+    (user-error "Om-dash: not on a table row"))
+  (when (save-excursion
+          (forward-line -1)
+          (and (org-at-table-p) (org-at-table-hline-p)
+               (progn (forward-line -1) (not (org-at-table-p)))))
+    (user-error "Om-dash: point is on table header, not on a row"))
+  (cl-mapcar #'cons
+             (om-dash--table-header)
+             (om-dash--table-split-line
+              (buffer-substring-no-properties (line-beginning-position)
+                                              (line-end-position)))))
+
+(defun om-dash--table-column-values (header)
+  "Return distinct non-empty values of column HEADER in the table at point."
+  (save-excursion
+    (let* ((index (seq-position (om-dash--table-header) header))
+           (end (org-table-end))
+           values)
+      (when index
+        (goto-char (org-table-begin))
+        (while (< (point) end)
+          (unless (org-at-table-hline-p)
+            (let ((value (nth index (om-dash--table-split-line
+                                     (buffer-substring-no-properties
+                                      (line-beginning-position)
+                                      (line-end-position))))))
+              (when (and (s-present-p value) (not (equal value header)))
+                (push value values))))
+          (forward-line 1)))
+      (seq-uniq (nreverse values)))))
+
+(defun om-dash--row-field (values header)
+  "Return non-empty value of column HEADER from row VALUES, or nil."
+  (let ((value (cdr (assoc header values))))
+    (when (s-present-p value)
+      value)))
+
+(defun om-dash--split-list (str separators)
+  "Split STR by any of SEPARATORS chars; strip “@“ prefixes and blanks.
+“@me“ is kept as is, since gh treats it as the current user."
+  (when str
+    (seq-remove #'s-blank-p
+                (seq-map (lambda (item)
+                           (let ((item (s-trim item)))
+                             (if (equal item "@me")
+                                 item
+                               (s-chop-prefix "@" item))))
+                         (split-string str (format "[%s]" separators))))))
+
+;;; Updating table rows in place
+
+(defun om-dash--table-raw-cells (line)
+  "Split table LINE into list of trimmed raw cell texts (links are kept)."
+  (seq-map #'s-trim (butlast (cdr (split-string line "|")))))
+
+(defun om-dash--table-update-row (updates)
+  "Set cells of the table row at point and realign the table.
+UPDATES is an alist of (HEADER . TEXT); cells of other columns, and
+columns not present in the table, are left as is."
+  (let* ((header (om-dash--table-header))
+         (line (buffer-substring-no-properties (line-beginning-position)
+                                               (line-end-position)))
+         (indent (progn (string-match "\\`[ \t]*" line)
+                        (match-string 0 line)))
+         (cells (om-dash--table-raw-cells line)))
+    (while (< (length cells) (length header))
+      (setq cells (append cells (list ""))))
+    (setq cells (seq-map-indexed
+                 (lambda (cell index)
+                   (if-let ((update (assoc (nth index header) updates)))
+                       (cdr update)
+                     cell))
+                 cells))
+    (delete-region (line-beginning-position) (line-end-position))
+    (insert indent "| " (s-join " | " cells) " |")
+    (org-table-align)))
+
+;;; Creating issues and drafts
+
+(defun om-dash--github-block-project (params)
+  "Return (OWNER . NUMBER) of v2 project from block PARAMS, or nil."
+  (let ((number (plist-get params :project))
+        (owner (or (plist-get params :owner)
+                   (when-let ((repo (plist-get params :repo)))
+                     (car (s-split "/" repo))))))
+    (when (and number owner
+               (not (eq (plist-get params :project-type) 'classic)))
+      (cons owner number))))
+
+(defun om-dash--github-status-field (params)
+  "Return name of project status field for block PARAMS."
+  (or (plist-get params :project-status-field)
+      om-dash-github-project-status-field))
+
+(defun om-dash--github-set-item-status (url number owner status-field status)
+  "Set STATUS-FIELD of project item for URL in project NUMBER to STATUS.
+URL may be an item reference like “#om-dash-item=PVTI_...“."
+  (let* ((item (om-dash--github-project-item url number owner status-field))
+         (option-id (or (cdr (assoc status (alist-get 'options item)))
+                        (user-error "Om-dash: unknown %s option %S"
+                                    status-field status))))
+    (om-dash--gh-call "project" "item-edit"
+                      "--id" (alist-get 'item-id item)
+                      "--project-id" (alist-get 'project-id item)
+                      "--field-id" (alist-get 'field-id item)
+                      "--single-select-option-id" option-id)))
+
+(defun om-dash--github-choose-repo (params values)
+  "Choose repository for a new issue.
+Uses “repo“ column of the row VALUES, then `:repo' block parameter,
+otherwise asks with completion over repositories found in the table."
+  (or (om-dash--row-field values "repo")
+      (plist-get params :repo)
+      (let ((repo (completing-read "Repository (owner/name): "
+                                   (om-dash--table-column-values "repo"))))
+        (unless (string-match-p "\\`[^/ ]+/[^/ ]+\\'" repo)
+          (user-error "Om-dash: bad repository %S" repo))
+        repo)))
+
+(defun om-dash--github-row-context ()
+  "Return block params and row values for creating a topic from current row."
+  (let ((params (or (om-dash--block-params "om-dash-github")
+                    (user-error "Om-dash: not inside om-dash-github block")))
+        (values (om-dash--table-row-values)))
+    (when (om-dash--row-link)
+      (user-error "Om-dash: row already refers to a topic; add a new row"))
+    (list params values)))
+
+(defun om-dash--github-with-body (arg description callback)
+  "Call CALLBACK with body text: empty, or edited in a buffer if ARG."
+  (if arg
+      (om-dash--edit-text description "" callback)
+    (funcall callback "")))
+
+;;;###autoload
+(defun om-dash-github-create-issue (&optional arg)
+  "Create github issue from the table row at point.
+
+Type a new row in a table generated by `om-dash-github' block, fill in
+cells, and run this command.  Cells are matched by table header:
+
+| header    | used as                                          |
+|-----------+--------------------------------------------------|
+| title     | issue title (required)                           |
+| repo      | repository “owner/name“                          |
+| assignee  | assignees, e.g. “@alice,@bob“                    |
+| tags      | labels, e.g. “:bug:ui:“ or “bug,ui“              |
+| milestone | milestone title                                  |
+| status    | project status (only if block has a v2 project)  |
+
+Other cells are ignored.  If there is no “repo“ cell, `:repo' block
+parameter is used, or you're asked to choose a repository (with
+completion over repositories found in the table).
+
+If the block has a v2 project (`:project' with `:owner' or `:repo'),
+the new issue is added to the project, and its status is set from the
+“status“ cell.
+
+Github needs some time until a new issue appears in listings, so the
+block is not refreshed; instead, the row is filled in with state,
+number and title linking to the new issue.  Refresh the block later
+to load full data from github.
+
+Without prefix ARG, the issue is created with empty body.  With prefix
+ARG, a buffer is opened to write the body first: \\<om-dash-edit-mode-map>\\[om-dash-edit-submit] creates the
+issue, \\[om-dash-edit-cancel] cancels."
+  (interactive "P")
+  (pcase-let* ((`(,params ,values) (om-dash--github-row-context))
+               (title (or (om-dash--row-field values "title")
+                          (user-error "Om-dash: row has no title")))
+               (repo (om-dash--github-choose-repo params values))
+               (labels (om-dash--split-list (om-dash--row-field values "tags") ":,"))
+               (assignees (om-dash--split-list
+                           (om-dash--row-field values "assignee") ", "))
+               (milestone (om-dash--row-field values "milestone"))
+               (status (om-dash--row-field values "status"))
+               (project (om-dash--github-block-project params))
+               (marker (point-marker)))
+    (om-dash--github-confirm (format "Create issue %S in" title) repo)
+    (om-dash--github-with-body
+     arg (format "Body of new issue %S (%s)" title repo)
+     (lambda (body)
+       (with-current-buffer (marker-buffer marker)
+         (save-excursion
+           (goto-char marker)
+           (let* ((output (apply #'om-dash--gh-call
+                                 "issue" "create" "-R" repo
+                                 "--title" title "--body" body
+                                 (append
+                                  (mapcan (lambda (label) (list "--label" label))
+                                          labels)
+                                  (mapcan (lambda (user) (list "--assignee" user))
+                                          assignees)
+                                  (when milestone (list "--milestone" milestone)))))
+                  (url (or (seq-find (lambda (line)
+                                       (string-match-p "\\`https://" line))
+                                     (reverse (s-lines (s-trim output))))
+                           (user-error "Om-dash: can't find issue url in gh output: %s"
+                                       output))))
+             (when project
+               (let ((item-id (s-trim (om-dash--gh-call
+                                       "project" "item-add"
+                                       (format "%s" (cdr project))
+                                       "--owner" (car project)
+                                       "--url" url
+                                       "--format" "json" "--jq" ".id"))))
+                 (when status
+                   (om-dash--github-set-item-status
+                    (concat "#om-dash-item=" item-id)
+                    (cdr project) (car project)
+                    (om-dash--github-status-field params) status))))
+             ;; github needs some time until new topic appears in listings,
+             ;; so instead of refreshing the block (which would drop the
+             ;; row), fill the row in place; next refresh loads full data
+             (beginning-of-line)
+             (om-dash--table-update-row
+              (list (cons "state" "OPEN")
+                    (cons "no." (org-link-make-string
+                                 url (if (string-match "/issues/\\([0-9]+\\)" url)
+                                         (format "#%s" (match-string 1 url))
+                                       "#")))
+                    (cons "title" (org-link-make-string url title))
+                    (cons "repo" repo)))
+             (message "Om-dash: created %s (refresh block later to load it from github)"
+                      url))))))))
+
+;;;###autoload
+(defun om-dash-github-create-draft (&optional arg)
+  "Create draft issue in v2 project from the table row at point.
+
+Type a new row in a table generated by `om-dash-github' block that has
+a v2 project (`:project' with `:owner' or `:repo'), fill in cells, and
+run this command.  Cells are matched by table header:
+
+| header | used as                    |
+|--------+----------------------------|
+| title  | draft title (required)     |
+| status | project status             |
+
+Other cells are ignored (drafts have no repository or labels).
+The block is not refreshed (github needs some time until a new item
+appears in listings); instead, the row is filled in with state and
+title linking to the new draft.  Refresh the block later.
+
+Without prefix ARG, the draft is created with empty body.  With prefix
+ARG, a buffer is opened to write the body first: \\<om-dash-edit-mode-map>\\[om-dash-edit-submit] creates the
+draft, \\[om-dash-edit-cancel] cancels."
+  (interactive "P")
+  (pcase-let* ((`(,params ,values) (om-dash--github-row-context))
+               (title (or (om-dash--row-field values "title")
+                          (user-error "Om-dash: row has no title")))
+               (status (om-dash--row-field values "status"))
+               (project (or (om-dash--github-block-project params)
+                            (user-error "Om-dash: draft issues need a v2 project (:project)")))
+               (marker (point-marker)))
+    (om-dash--github-confirm
+     (format "Create draft %S in" title)
+     (format "project %s/%s" (car project) (cdr project)))
+    (om-dash--github-with-body
+     arg (format "Body of new draft %S" title)
+     (lambda (body)
+       (with-current-buffer (marker-buffer marker)
+         (save-excursion
+           (goto-char marker)
+           (let ((item-id (s-trim (om-dash--gh-call
+                                   "project" "item-create"
+                                   (format "%s" (cdr project))
+                                   "--owner" (car project)
+                                   "--title" title
+                                   "--body" body
+                                   "--format" "json" "--jq" ".id"))))
+             (when status
+               (om-dash--github-set-item-status
+                (concat "#om-dash-item=" item-id)
+                (cdr project) (car project)
+                (om-dash--github-status-field params) status))
+             ;; fill the row in place (see `om-dash-github-create-issue');
+             ;; link has the same form as links generated for drafts
+             (let* ((json (json-parse-string
+                           (om-dash--gh-call
+                            "api" "graphql"
+                            "-f" (s-concat "query=query($id: ID!) { node(id: $id) { "
+                                           "... on ProjectV2Item { databaseId "
+                                           "project { url } } } }")
+                            "-f" (s-concat "id=" item-id))
+                           :object-type 'alist :null-object nil))
+                    (url (format "%s?pane=issue&itemId=%s#om-dash-item=%s"
+                                 (let-alist json .data.node.project.url)
+                                 (let-alist json .data.node.databaseId)
+                                 item-id)))
+               (beginning-of-line)
+               (om-dash--table-update-row
+                (list (cons "state" "DRAFT")
+                      (cons "title" (org-link-make-string url title)))))
+             (message "Om-dash: created draft %S (refresh block later to load it from github)"
+                      title))))))))
 
 ;;;###autoload
 (defun om-dash-update-tree ()
@@ -4276,6 +4671,8 @@ Assumes that om-dash--table-field-p returned true."
     (define-key map (kbd "c") #'om-dash-github-close-topic)
     (define-key map (kbd "o") #'om-dash-github-reopen-topic)
     (define-key map (kbd "x") #'om-dash-github-toggle-topic-state)
+    (define-key map (kbd "n") #'om-dash-github-create-issue)
+    (define-key map (kbd "N") #'om-dash-github-create-draft)
     map)
   "Keymap of om-dash commands, bound to `om-dash-mode-prefix-key'.")
 
