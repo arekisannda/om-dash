@@ -32,6 +32,7 @@
 
 ;; https://github.com/mrc/el-csv
 (require 'parse-csv nil 'noerror)
+(declare-function parse-csv-string-rows "parse-csv")
 
 (defun om-dash--parse-json (columns raw-output)
   "Parse json output to table."

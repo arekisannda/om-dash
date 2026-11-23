@@ -134,5 +134,8 @@
 (require 'om-dash-command)
 (require 'om-dash-mode)
 
+;; Make byte compiler happy.
+(declare-function org-ql--normalize-query "org-ql" t t)
+
 (provide 'om-dash)
 ;;; om-dash.el ends here
