@@ -46,12 +46,12 @@
 
 ;; Command `om-dash-github-set-project-status' changes v2 project status
 ;; (e.g. Todo / In Progress) of the issue or pull request at point.
-;; Commands `om-dash-github-close-topic', `om-dash-github-reopen-topic',
-;; and `om-dash-github-toggle-topic-state' close or reopen it.
-;; Commands `om-dash-github-create-issue' and `om-dash-github-create-draft'
-;; create a topic from a new row typed into the table.
+;; Commands `om-dash-github-close-item', `om-dash-github-reopen-item',
+;; and `om-dash-github-toggle-item-state' close or reopen it.
+;; Commands `om-dash-github-create-item' and `om-dash-github-create-draft'
+;; create an item from a new row typed into the table.
 ;; Commands `om-dash-github-edit-body', `om-dash-github-edit-labels', and
-;; `om-dash-github-edit-assignees' edit the topic on the current row.
+;; `om-dash-github-edit-assignees' edit the item on the current row.
 ;; Command `om-dash-github-delete-item' removes it from the project, or
 ;; with prefix argument deletes the issue permanently.
 
@@ -117,7 +117,7 @@
 ;;   om-dash-edit.el              buffer for editing text (C-c C-c / C-c C-k)
 ;;   om-dash-forge.el             forge-independent helpers for issue trackers
 ;;   om-dash-github.el            github issues and pull requests block
-;;   om-dash-github-commands.el   commands for github topics in om-dash tables
+;;   om-dash-github-commands.el   commands for github items in om-dash tables
 ;;   om-dash-orgfile.el           org file block
 ;;   om-dash-imap.el              IMAP folders block
 ;;   om-dash-command.el           shell command and elisp function blocks
