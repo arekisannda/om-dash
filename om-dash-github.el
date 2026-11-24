@@ -1609,7 +1609,7 @@ Draft issues of the project are included as issues with state “DRAFT“
 \(considered open, i.e. matched by `:open' and “is:open“; “is:draft“
 matches draft issues and draft pull requests).  They have no number or
 repository, and their link opens the item in the project.
-`om-dash-github-set-project-status' works for them, closing and
+`om-dash-forge-set-status' works for them, closing and
 reopening doesn't (convert draft to issue first).
 `:project-status' matches the `:project-status-field' value of the item.
 

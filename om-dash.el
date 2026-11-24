@@ -44,16 +44,19 @@
 ;; The package also provides a minor mode `om-dash-mode' that applies
 ;; highlighting to the generated tables.
 
-;; Command `om-dash-github-set-project-status' changes v2 project status
-;; (e.g. Todo / In Progress) of the issue or pull request at point.
-;; Commands `om-dash-github-close-item', `om-dash-github-reopen-item',
-;; and `om-dash-github-toggle-item-state' close or reopen it.
-;; Commands `om-dash-github-create-item' and `om-dash-github-create-draft'
+;; Forge commands work on the item (issue, pull request, draft) on the
+;; current row of a forge block table (e.g. `om-dash-github'); the
+;; backend is chosen by the name of the enclosing block.
+;; Command `om-dash-forge-set-status' changes status (for github, v2
+;; project status, e.g. Todo / In Progress) of the item at point.
+;; Commands `om-dash-forge-close-item', `om-dash-forge-reopen-item',
+;; and `om-dash-forge-toggle-item-state' close or reopen it.
+;; Commands `om-dash-forge-create-item' and `om-dash-forge-create-draft'
 ;; create an item from a new row typed into the table.
-;; Commands `om-dash-github-edit-body', `om-dash-github-edit-labels', and
-;; `om-dash-github-edit-assignees' edit the item on the current row.
-;; Command `om-dash-github-delete-item' removes it from the project, or
-;; with prefix argument deletes the issue permanently.
+;; Commands `om-dash-forge-edit-body', `om-dash-forge-edit-labels', and
+;; `om-dash-forge-edit-assignees' edit the item on the current row.
+;; Command `om-dash-forge-delete-item' removes it from the project, or
+;; with prefix argument deletes it permanently.
 
 ;; Block parameters can be given inline on the “#+BEGIN:“ line, or in
 ;; property drawers of enclosing headings, which allows to share common
@@ -116,8 +119,9 @@
 ;;   om-dash-table.el             org table generation and editing
 ;;   om-dash-edit.el              buffer for editing text (C-c C-c / C-c C-k)
 ;;   om-dash-forge.el             forge-independent helpers for issue trackers
+;;   om-dash-forge-commands.el    forge commands, contract for forge backends
 ;;   om-dash-github.el            github issues and pull requests block
-;;   om-dash-github-commands.el   commands for github items in om-dash tables
+;;   om-dash-github-commands.el   github backend of forge commands
 ;;   om-dash-orgfile.el           org file block
 ;;   om-dash-imap.el              IMAP folders block
 ;;   om-dash-command.el           shell command and elisp function blocks
@@ -129,6 +133,7 @@
 (require 'om-dash-table)
 (require 'om-dash-edit)
 (require 'om-dash-forge)
+(require 'om-dash-forge-commands)
 (require 'om-dash-github)
 (require 'om-dash-github-commands)
 (require 'om-dash-orgfile)

@@ -602,6 +602,20 @@ Point must be inside the block."
         (append (list :name name)
                 (read (concat "(" (match-string-no-properties 1) ")")))))))
 
+(defun om-dash--dblock-name ()
+  "Return name of the enclosing om-dash dynamic block, or nil.
+E.g. “om-dash-github“ for “#+BEGIN: om-dash-github ...“.
+Point must be inside the block."
+  (save-excursion
+    (let ((case-fold-search t)
+          (start (point)))
+      (when (and (re-search-backward
+                  "^[ \t]*#\\+BEGIN:[ \t]+\\(om-dash-[^ \t\n]+\\)" nil t)
+                 ;; make sure the block wasn't closed before start point
+                 (not (save-excursion
+                        (re-search-forward "^[ \t]*#\\+END:" start t))))
+        (match-string-no-properties 1)))))
+
 (defun om-dash--block-params (name)
   "Return effective parameters of the enclosing dynamic block NAME, or nil.
 Same as what the block itself uses: drawer parameters of enclosing

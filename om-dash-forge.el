@@ -28,12 +28,16 @@
 ;;    are alists like `gh pr list --json' output (`url', `state',
 ;;    `number', `title', `parent', ...) so that nesting, grouping and
 ;;    table code can be reused;
-;;  - om-dash-gitlab-commands.el: row commands (status, close, create,
-;;    edit), built on `om-dash--table-row-values',
-;;    `om-dash--forge-read-list', `om-dash--forge-diff-args',
-;;    `om-dash--forge-update-row-cells' and `om-dash--edit-text';
-;;  - key bindings: the commands module adds its keys to
-;;    `om-dash-command-map' (see end of om-dash-github-commands.el);
+;;  - om-dash-gitlab-commands.el: gitlab backend of forge commands;
+;;    registers itself with `om-dash--forge-register-backend' and
+;;    implements every `om-dash-forge--ACTION' generic function of
+;;    om-dash-forge-commands.el, 1:1 (unsupported features are reported
+;;    with `om-dash--forge-unsupported'); built on
+;;    `om-dash--table-row-values', `om-dash--forge-read-list',
+;;    `om-dash--forge-diff-args', `om-dash--forge-update-row-cells' and
+;;    `om-dash--edit-text';
+;;  - key bindings: none, commands and keys are shared (see
+;;    om-dash-forge-commands.el);
 ;;  - “OM_DASH_GITLAB“ drawer parameters work automatically, since
 ;;    property name is derived from block name.
 

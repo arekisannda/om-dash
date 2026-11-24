@@ -277,8 +277,8 @@ Assumes that om-dash--table-field-p returned true."
     (define-key map (kbd "a") #'org-update-all-dblocks)
     map)
   "Keymap of om-dash commands, bound to `om-dash-mode-prefix-key'.
-Generic commands are bound here; forge modules (e.g. om-dash-github-commands)
-add their own commands to this map.")
+Generic commands are bound here; forge commands are added by
+om-dash-forge-commands.el.")
 
 (defvar om-dash-mode-map (make-sparse-keymap)
   "Keymap for `om-dash-mode'.
