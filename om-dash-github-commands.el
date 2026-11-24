@@ -297,6 +297,7 @@ CONTEXT is forge context of the row.  See `om-dash-forge--create-item'."
                (assignees (om-dash--split-list
                            (om-dash--row-field values "assignee") ", "))
                (milestone (om-dash--row-field values "milestone"))
+               (parent (om-dash--row-field values "parent"))
                (status (om-dash--row-field values "status"))
                (project (om-dash--github-block-project params)))
     (om-dash--github-confirm (format "Create issue %S in" title) repo)
@@ -309,7 +310,9 @@ CONTEXT is forge context of the row.  See `om-dash-forge--create-item'."
                                      labels)
                              (mapcan (lambda (user) (list "--assignee" user))
                                      assignees)
-                             (when milestone (list "--milestone" milestone)))))
+                             (when milestone (list "--milestone" milestone))
+                             ;; gh takes a number (same repository) or URL
+                             (when parent (list "--parent" (s-chop-prefix "#" parent))))))
              (url (or (seq-find (lambda (line)
                                   (string-match-p "\\`https://" line))
                                 (reverse (s-lines (s-trim output))))
@@ -727,6 +730,7 @@ Cells are matched by table header:
   assignee   Assignees, e.g. “@alice,@bob“.
   tags       Labels, e.g. “:bug:ui:“ or “bug,ui“.
   milestone  Milestone title.
+  parent     Parent issue, e.g. “#12“ (same repository) or URL.
   status     Project status (only if block has a v2 project).
 
 Other cells are ignored.  If there is no “repo“ cell, `:repo' block
