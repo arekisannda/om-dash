@@ -86,6 +86,13 @@ also read cells of the row (see `om-dash--table-row-values')."
           :url (om-dash--row-link)
           :marker (point-marker))))
 
+(defun om-dash--forge-column-at-point ()
+  "Return header of the table column at point, or nil."
+  (when (and (org-at-table-p) (not (org-at-table-hline-p)))
+    (let ((index (org-table-current-column)))
+      (when (> index 0)
+        (nth (1- index) (om-dash--table-header))))))
+
 (defun om-dash--forge-unsupported (backend feature &optional hint)
   "Report that BACKEND doesn't support FEATURE; not an error.
 FEATURE is a description like “closing draft issues“.  HINT is an
@@ -102,27 +109,12 @@ optional suggestion shown in parentheses.  Returns nil."
 
 ;;; Generic functions (implemented by every backend)
 
-(cl-defgeneric om-dash-forge--set-status (backend context status)
-  "Set status of the item in CONTEXT to STATUS (nil: ask).
-BACKEND decides what status is (e.g. github v2 project field)."
-  (ignore context status)
-  (error "Om-dash: %s backend doesn't implement set-status" backend))
-
-(cl-defgeneric om-dash-forge--close-item (backend context arg)
-  "Close the item in CONTEXT; ARG asks for backend-specific options."
-  (ignore context arg)
-  (error "Om-dash: %s backend doesn't implement close-item" backend))
-
-(cl-defgeneric om-dash-forge--reopen-item (backend context arg)
-  "Reopen the item in CONTEXT; ARG asks for backend-specific options."
-  (ignore context arg)
-  (error "Om-dash: %s backend doesn't implement reopen-item" backend))
-
-(cl-defgeneric om-dash-forge--toggle-item-state (backend context arg)
-  "Close the item in CONTEXT if it's open, reopen it if it's closed.
-ARG is passed to close or reopen."
-  (ignore context arg)
-  (error "Om-dash: %s backend doesn't implement toggle-item-state" backend))
+(cl-defgeneric om-dash-forge--set-field (backend context column)
+  "Set field of the item in CONTEXT shown in COLUMN (table header).
+BACKEND decides which columns can be changed and how the new value is
+read (e.g. with completion); other columns are an error."
+  (ignore context column)
+  (error "Om-dash: %s backend doesn't implement set-field" backend))
 
 (cl-defgeneric om-dash-forge--create-item (backend context arg)
   "Create item from the new row in CONTEXT; with ARG, create a draft."
@@ -139,16 +131,6 @@ ARG is passed to close or reopen."
   (ignore context)
   (error "Om-dash: %s backend doesn't implement edit-body" backend))
 
-(cl-defgeneric om-dash-forge--edit-labels (backend context)
-  "Edit labels of the item in CONTEXT."
-  (ignore context)
-  (error "Om-dash: %s backend doesn't implement edit-labels" backend))
-
-(cl-defgeneric om-dash-forge--edit-assignees (backend context)
-  "Edit assignees of the item in CONTEXT."
-  (ignore context)
-  (error "Om-dash: %s backend doesn't implement edit-assignees" backend))
-
 (cl-defgeneric om-dash-forge--delete-item (backend context arg)
   "Remove the item in CONTEXT from its project; with ARG, delete it."
   (ignore context arg)
@@ -157,39 +139,19 @@ ARG is passed to close or reopen."
 ;;; Commands
 
 ;;;###autoload
-(defun om-dash-forge-set-status (&optional status)
-  "Set status of the item on the current row.
+(defun om-dash-forge-set-field ()
+  "Set the field of the item on the current row shown in the column at point.
 
 The item is taken from the first link on the row of a table generated
-by a forge block, e.g. `om-dash-github'.  When called interactively,
-STATUS is read with completion.  What status is depends on the backend
-\(e.g. a field of github v2 project), see `om-dash-forge--set-status'."
+by a forge block, e.g. `om-dash-github'.  The field is chosen by the
+column of the cell at point (e.g. “state“, “status“, “tags“).
+Which columns can be changed, and how the new value is read, depends
+on the backend, see `om-dash-forge--set-field'.  Columns that can't be
+changed (e.g. “no.“, “author“) are an error."
   (interactive)
-  (om-dash--forge-call #'om-dash-forge--set-status status))
-
-;;;###autoload
-(defun om-dash-forge-close-item (&optional arg)
-  "Close the item on the current row.
-With prefix ARG, ask for backend-specific options (e.g. reason and
-comment), see `om-dash-forge--close-item'."
-  (interactive "P")
-  (om-dash--forge-call #'om-dash-forge--close-item arg))
-
-;;;###autoload
-(defun om-dash-forge-reopen-item (&optional arg)
-  "Reopen the item on the current row.
-With prefix ARG, ask for backend-specific options (e.g. comment), see
-`om-dash-forge--reopen-item'."
-  (interactive "P")
-  (om-dash--forge-call #'om-dash-forge--reopen-item arg))
-
-;;;###autoload
-(defun om-dash-forge-toggle-item-state (&optional arg)
-  "Close the item on the current row if it's open, reopen it if it's closed.
-Prefix ARG is passed to `om-dash-forge-close-item' or
-`om-dash-forge-reopen-item'."
-  (interactive "P")
-  (om-dash--forge-call #'om-dash-forge--toggle-item-state arg))
+  (om-dash--forge-call #'om-dash-forge--set-field
+                       (or (om-dash--forge-column-at-point)
+                           (user-error "Om-dash: point is not in a table cell"))))
 
 ;;;###autoload
 (defun om-dash-forge-create-item (&optional arg)
@@ -221,20 +183,6 @@ See `om-dash-forge--edit-body'."
   (om-dash--forge-call #'om-dash-forge--edit-body))
 
 ;;;###autoload
-(defun om-dash-forge-edit-labels ()
-  "Edit labels of the item on the current row.
-See `om-dash-forge--edit-labels'."
-  (interactive)
-  (om-dash--forge-call #'om-dash-forge--edit-labels))
-
-;;;###autoload
-(defun om-dash-forge-edit-assignees ()
-  "Edit assignees of the item on the current row.
-See `om-dash-forge--edit-assignees'."
-  (interactive)
-  (om-dash--forge-call #'om-dash-forge--edit-assignees))
-
-;;;###autoload
 (defun om-dash-forge-delete-item (&optional arg)
   "Remove the item on the current row from its project.
 With prefix ARG, delete the item permanently instead.  See
@@ -245,15 +193,10 @@ With prefix ARG, delete the item permanently instead.  See
 ;;; Key bindings
 
 ;; forge commands in `om-dash-command-map' (prefix `om-dash-mode-prefix-key')
-(define-key om-dash-command-map (kbd "s") #'om-dash-forge-set-status)
-(define-key om-dash-command-map (kbd "c") #'om-dash-forge-close-item)
-(define-key om-dash-command-map (kbd "o") #'om-dash-forge-reopen-item)
-(define-key om-dash-command-map (kbd "x") #'om-dash-forge-toggle-item-state)
+(define-key om-dash-command-map (kbd "s") #'om-dash-forge-set-field)
 (define-key om-dash-command-map (kbd "n") #'om-dash-forge-create-item)
 (define-key om-dash-command-map (kbd "N") #'om-dash-forge-create-draft)
 (define-key om-dash-command-map (kbd "e") #'om-dash-forge-edit-body)
-(define-key om-dash-command-map (kbd "l") #'om-dash-forge-edit-labels)
-(define-key om-dash-command-map (kbd "A") #'om-dash-forge-edit-assignees)
 (define-key om-dash-command-map (kbd "d") #'om-dash-forge-delete-item)
 
 (provide 'om-dash-forge-commands)

@@ -269,16 +269,11 @@ Assumes that om-dash--table-field-p returned true."
                  ((om-dash--cellp om-dash--text-regexp)
                   (om-dash--fontify text-beg text-end 'om-dash-text))))))))))))
 
-(defvar om-dash-command-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "b") #'org-dblock-update)
-    (define-key map (kbd "u") #'om-dash-update-subtree)
-    (define-key map (kbd "t") #'om-dash-update-tree)
-    (define-key map (kbd "a") #'org-update-all-dblocks)
-    map)
+(defvar om-dash-command-map (make-sparse-keymap)
   "Keymap of om-dash commands, bound to `om-dash-mode-prefix-key'.
-Generic commands are bound here; forge commands are added by
-om-dash-forge-commands.el.")
+Forge commands are added by om-dash-forge-commands.el.  Commands for
+updating blocks are not bound here, since org already has keys for
+them (e.g. `C-c C-x C-u' for `org-dblock-update').")
 
 (defvar om-dash-mode-map (make-sparse-keymap)
   "Keymap for `om-dash-mode'.

@@ -1609,8 +1609,8 @@ Draft issues of the project are included as issues with state “DRAFT“
 \(considered open, i.e. matched by `:open' and “is:open“; “is:draft“
 matches draft issues and draft pull requests).  They have no number or
 repository, and their link opens the item in the project.
-`om-dash-forge-set-status' works for them, closing and
-reopening doesn't (convert draft to issue first).
+`om-dash-forge-set-field' can change their status, title and
+assignees, but not state (convert draft to issue first).
 `:project-status' matches the `:project-status-field' value of the item.
 
 Under the hood, this block uses combination of gh and jq commands like:

@@ -21,9 +21,9 @@
 
 ;; Github backend of forge commands (see om-dash-forge-commands.el):
 ;; implements every `om-dash-forge--ACTION' generic function for items
-;; on rows of `om-dash-github' tables: set project status,
-;; close/reopen, create from a new row, edit body, labels and
-;; assignees, remove from project or delete.
+;; on rows of `om-dash-github' tables: set fields (state, title,
+;; status, labels, assignees, reviewers, milestone, parent), create
+;; from a new row, edit body, remove from project or delete.
 
 ;;; Code:
 
@@ -133,12 +133,6 @@ If STATUS-FIELD is nil, the field is not looked up, and `field-id' and
   :package-version '(om-dash . "0.7")
   :group 'om-dash
   :type 'boolean)
-
-(defun om-dash--github-refresh-block ()
-  "Regenerate enclosing om-dash-github block, if point is inside one."
-  (when (om-dash--dblock-params "om-dash-github")
-    (save-excursion
-      (org-dblock-update))))
 
 (defun om-dash--github-confirm (action url)
   "Ask confirmation for ACTION on URL, if enabled."
@@ -413,7 +407,38 @@ CONTEXT is forge context of the row.  See `om-dash-forge--create-draft'."
 
 ;;; Forge commands: github methods
 
-(cl-defmethod om-dash-forge--set-status ((_backend (eql github)) context status)
+(cl-defmethod om-dash-forge--set-field ((_backend (eql github)) context column)
+  "Set field of the issue, pull request or draft in CONTEXT shown in COLUMN.
+
+Columns that can be changed:
+
+  state      Open or closed, see `om-dash--github-set-state'.
+  title      Title, see `om-dash--github-set-title'.
+  status     V2 project status, see `om-dash--github-set-status'.
+  tags       Labels, see `om-dash--github-set-labels'.
+  assignee   Assignees, see `om-dash--github-set-assignees'.
+  reviewer   Requested reviewers of pull requests, see
+             `om-dash--github-set-reviewers'.
+  milestone  Milestone, see `om-dash--github-set-milestone'.
+  parent     Parent issue, see `om-dash--github-set-parent'.
+
+Other columns can't be changed (an error): “no.“, “author“,
+“sub-issues“ (computed from sub-issues), timestamps, “repo“ (moving
+an issue to another repository changes its number), and “project“
+\(adding and removing items isn't a field change; see
+`om-dash-forge-delete-item')."
+  (pcase column
+    ("state" (om-dash--github-set-state context))
+    ("title" (om-dash--github-set-title context))
+    ("status" (om-dash--github-set-status context))
+    ("tags" (om-dash--github-set-labels context))
+    ("assignee" (om-dash--github-set-assignees context))
+    ("reviewer" (om-dash--github-set-reviewers context))
+    ("milestone" (om-dash--github-set-milestone context))
+    ("parent" (om-dash--github-set-parent context))
+    (_ (user-error "Om-dash: column %S can't be changed" column))))
+
+(defun om-dash--github-set-status (context)
   "Set v2 project status of the issue, pull request or draft in CONTEXT.
 
 The project is taken from `:project' and `:owner' (or owner part of
@@ -424,8 +449,8 @@ projects are not supported.
 
 The field to change is `:project-status-field' block parameter, or
 `om-dash-github-project-status-field' (default “Status“).  It must be
-a single-select field.  STATUS is the option name; if nil, it is read
-with completion from the field's options.
+a single-select field.  The new option is read with completion from
+the field's options.
 
 After the change, the enclosing block is regenerated.
 
@@ -444,9 +469,8 @@ Requires “project“ token scope:
              (status-field (om-dash--github-status-field params))
              (item (om-dash--github-project-item url number owner status-field))
              (options (alist-get 'options item))
-             (status (or status
-                         (completing-read (format "%s: " status-field)
-                                          (seq-map #'car options) nil t)))
+             (status (completing-read (format "%s: " status-field)
+                                      (seq-map #'car options) nil t))
              (option-id (or (cdr (assoc status options))
                             (user-error "Om-dash: unknown %s option %S"
                                         status-field status))))
@@ -462,72 +486,225 @@ Requires “project“ token scope:
         (save-excursion
           (org-dblock-update))))))
 
-(cl-defmethod om-dash-forge--close-item ((_backend (eql github)) context arg)
-  "Close the issue or pull request in CONTEXT.
+(defun om-dash--github-set-state (context)
+  "Close or reopen the issue or pull request in CONTEXT.
 
-The block is regenerated afterwards.  With ARG, ask for close reason
-\(issues only: “completed“, “not planned“, or “duplicate“) and an
-optional comment.  Draft issues can't be closed."
+The new state is read with completion:
+
+  OPEN                 Reopen.
+  CLOSED               Close (pull requests).
+  CLOSED: completed    Close issue as completed.
+  CLOSED: not planned  Close issue as not planned.
+  CLOSED: duplicate    Close issue as duplicate (of an issue that is
+                       asked for).
+
+The current state is queried from github.  Merged pull requests can't
+be changed, and draft issues have no state.  The change is confirmed
+if `om-dash-github-confirm-changes' is non-nil.  Then “state“ cell of
+the row is updated (the block is not refreshed)."
   (let ((target (om-dash--github-row-target (om-dash--github-url context))))
     (if (eq (plist-get target :kind) 'draft)
-        (om-dash--forge-unsupported 'github "closing draft issues"
+        (om-dash--forge-unsupported 'github "state of draft issues"
                                     "convert to issue first")
       (let* ((kind (om-dash--github-gh-kind target))
              (url (plist-get target :url))
-             (reason (when (and arg (string= kind "issue"))
-                       (completing-read "Reason: " '("completed" "not planned" "duplicate")
-                                        nil t nil nil "completed")))
-             (duplicate-of (when (equal reason "duplicate")
-                             (read-string "Duplicate of (number or URL): ")))
-             (comment (when arg
-                        (read-string "Comment (empty for none): "))))
-        (om-dash--github-confirm "Close" url)
-        (apply #'om-dash--gh-call kind "close" url
-               (append (cond ((s-present-p duplicate-of)
-                              (list "--duplicate-of" duplicate-of))
-                             (reason
-                              (list "--reason" reason)))
-                       (when (s-present-p comment) (list "--comment" comment))))
-        (message "Om-dash: closed %s" url)
-        (om-dash--github-refresh-block)))))
+             (current (s-trim (om-dash--gh-call kind "view" url
+                                                "--json" "state" "--jq" ".state")))
+             (_ (when (equal current "MERGED")
+                  (user-error "Om-dash: %s is merged, its state can't be changed" url)))
+             (choice (completing-read
+                      (format "State (now %s): " current)
+                      (if (string= kind "issue")
+                          '("OPEN" "CLOSED: completed" "CLOSED: not planned"
+                            "CLOSED: duplicate")
+                        '("OPEN" "CLOSED"))
+                      nil t))
+             (state (if (string= choice "OPEN") "OPEN" "CLOSED"))
+             (reason (when (string-prefix-p "CLOSED: " choice)
+                       (string-remove-prefix "CLOSED: " choice))))
+        (if (equal state current)
+            (message "Om-dash: state unchanged")
+          (let ((duplicate-of (when (equal reason "duplicate")
+                                (read-string "Duplicate of (number or URL): "))))
+            (om-dash--github-confirm (if (equal state "OPEN") "Reopen" "Close") url)
+            (apply #'om-dash--gh-call kind (if (equal state "OPEN") "reopen" "close") url
+                   (cond ((s-present-p duplicate-of)
+                          (list "--duplicate-of" duplicate-of))
+                         (reason
+                          (list "--reason" reason))))
+            (om-dash--forge-update-row-cells
+             (plist-get context :marker) (list (cons "state" state)))
+            (message "Om-dash: %s is %s" url state)))))))
 
-(cl-defmethod om-dash-forge--reopen-item ((_backend (eql github)) context arg)
-  "Reopen the issue or pull request in CONTEXT.
+(defun om-dash--github-update-title-cell (marker url old-title new-title)
+  "Replace OLD-TITLE with NEW-TITLE in “title“ cell of the row at MARKER.
+The link to URL and sub-issue prefix of the cell (see
+`om-dash-github-sub-issue-prefix') are kept."
+  (with-current-buffer (marker-buffer marker)
+    (save-excursion
+      (goto-char marker)
+      (let* ((index (seq-position (om-dash--table-header) "title"))
+             (raw (when index
+                    (nth index (om-dash--table-raw-cells
+                                (buffer-substring-no-properties
+                                 (line-beginning-position) (line-end-position))))))
+             (linked (and raw (string-match org-link-bracket-re raw)))
+             (text (if linked (or (match-string 2 raw) "") (or raw "")))
+             (prefix (if (string-suffix-p old-title text)
+                         (string-remove-suffix old-title text)
+                       ""))
+             (new-text (concat prefix new-title)))
+        (when index
+          (om-dash--forge-update-row-cells
+           ;; not `org-link-make-string', which trims the description
+           ;; (and so the indentation of sub-issue titles)
+           marker (list (cons "title" (if linked
+                                          (format "[[%s][%s]]" url new-text)
+                                        new-text)))))))))
 
-The block is regenerated afterwards.  With ARG, ask for an optional
-comment.  Draft issues can't be reopened."
+(defun om-dash--github-set-title (context)
+  "Edit title of the issue, pull request or draft in CONTEXT.
+The current title is queried from github and edited in the minibuffer.
+Then “title“ cell of the row is updated (the block is not refreshed)."
+  (let* ((target (om-dash--github-row-target (om-dash--github-url context)))
+         (url (plist-get target :url)))
+    (if (eq (plist-get target :kind) 'draft)
+        (let* ((draft (om-dash--github-draft-info (plist-get target :item-id)))
+               (current (alist-get 'title draft))
+               (title (read-string "Title: " current)))
+          (if (equal title current)
+              (message "Om-dash: title unchanged")
+            (om-dash--gh-call
+             "api" "graphql"
+             "-f" (s-concat "query=mutation($id: ID!, $title: String!) { "
+                            "updateProjectV2DraftIssue(input: {draftIssueId: $id, title: $title}) "
+                            "{ draftIssue { id } } }")
+             "-f" (s-concat "id=" (alist-get 'id draft))
+             "-f" (s-concat "title=" title))
+            (om-dash--github-update-title-cell (plist-get context :marker) url current title)
+            (message "Om-dash: title of draft set to %S" title)))
+      (let* ((kind (om-dash--github-gh-kind target))
+             (current (s-chop-suffix "\n" (om-dash--gh-call kind "view" url
+                                                             "--json" "title" "--jq" ".title")))
+             (title (read-string "Title: " current)))
+        (if (equal title current)
+            (message "Om-dash: title unchanged")
+          (om-dash--gh-call kind "edit" url "--title" title)
+          (om-dash--github-update-title-cell (plist-get context :marker) url current title)
+          (message "Om-dash: title of %s set to %S" url title))))))
+
+(defun om-dash--github-set-milestone (context)
+  "Set milestone of the issue or pull request in CONTEXT.
+The milestone is read with completion over open milestones of the
+repository; empty input removes the milestone.  Then “milestone“ cell
+of the row is updated (the block is not refreshed).  Draft issues have
+no milestones."
   (let ((target (om-dash--github-row-target (om-dash--github-url context))))
     (if (eq (plist-get target :kind) 'draft)
-        (om-dash--forge-unsupported 'github "reopening draft issues"
-                                    "convert to issue first")
+        (om-dash--forge-unsupported 'github "milestones of draft issues")
       (let* ((kind (om-dash--github-gh-kind target))
              (url (plist-get target :url))
-             (comment (when arg
-                        (read-string "Comment (empty for none): "))))
-        (om-dash--github-confirm "Reopen" url)
-        (apply #'om-dash--gh-call kind "reopen" url
-               (when (s-present-p comment) (list "--comment" comment)))
-        (message "Om-dash: reopened %s" url)
-        (om-dash--github-refresh-block)))))
+             (current (s-trim (om-dash--gh-call kind "view" url "--json" "milestone"
+                                                "--jq" ".milestone.title // \"\"")))
+             (available (seq-remove #'s-blank-p
+                                    (s-lines (om-dash--gh-call
+                                              "api" "--paginate"
+                                              (format "repos/%s/milestones"
+                                                      (plist-get target :repo))
+                                              "--jq" ".[].title"))))
+             (milestone (s-trim (completing-read
+                                 (format "Milestone (now %s, empty to remove): "
+                                         (if (s-present-p current) current "none"))
+                                 available))))
+        (cond
+         ((equal milestone current)
+          (message "Om-dash: milestone unchanged"))
+         ((and (s-present-p milestone) (not (member milestone available)))
+          (user-error "Om-dash: no open milestone %S in %s"
+                      milestone (plist-get target :repo)))
+         (t
+          (if (s-blank-p milestone)
+              (om-dash--gh-call kind "edit" url "--remove-milestone")
+            (om-dash--gh-call kind "edit" url "--milestone" milestone))
+          (om-dash--forge-update-row-cells
+           (plist-get context :marker) (list (cons "milestone" milestone)))
+          (message "Om-dash: milestone of %s: %s" url
+                   (if (s-present-p milestone) milestone "none"))))))))
 
-(cl-defmethod om-dash-forge--toggle-item-state ((_backend (eql github)) context arg)
-  "Close the item in CONTEXT if it's open, reopen it if it's closed.
-Current state is queried from github.  Merged pull requests can't be
-reopened.  ARG is passed to close or reopen."
+(defun om-dash--github-set-reviewers (context)
+  "Edit requested reviewers of the pull request in CONTEXT.
+
+Reviewers are read in the minibuffer, starting with the currently
+requested ones, with completion over assignable users of the
+repository; separate them with commas.  Review requests are added and
+removed accordingly.  Then “reviewer“ cell of the row is updated (the
+block is not refreshed).  Issues and draft issues have no reviewers."
   (let ((target (om-dash--github-row-target (om-dash--github-url context))))
-    (if (eq (plist-get target :kind) 'draft)
-        (om-dash--forge-unsupported 'github "closing and reopening draft issues"
-                                    "convert to issue first")
+    (if (not (eq (plist-get target :kind) 'pr))
+        (om-dash--forge-unsupported 'github "reviewers of issues"
+                                    "only pull requests have reviewers")
       (let* ((url (plist-get target :url))
-             (state (s-trim (om-dash--gh-call (om-dash--github-gh-kind target)
-                                              "view" url
-                                              "--json" "state"
-                                              "--jq" ".state"))))
-        (pcase state
-          ("OPEN" (om-dash-forge--close-item 'github context arg))
-          ("CLOSED" (om-dash-forge--reopen-item 'github context arg))
-          ("MERGED" (user-error "Om-dash: %s is merged and can't be reopened" url))
-          (_ (user-error "Om-dash: unknown state %S of %s" state url)))))))
+             (current (seq-remove #'s-blank-p
+                                  (s-lines (s-trim
+                                            (om-dash--gh-call "pr" "view" url
+                                                              "--json" "reviewRequests"
+                                                              "--jq" ".reviewRequests[].login")))))
+             (available (seq-remove #'s-blank-p
+                                    (s-lines (om-dash--gh-call
+                                              "api" "--paginate"
+                                              (format "repos/%s/assignees"
+                                                      (plist-get target :repo))
+                                              "--jq" ".[].login"))))
+             (desired (seq-uniq
+                       (seq-map (lambda (login) (s-chop-prefix "@" login))
+                                (om-dash--forge-read-list "Reviewers: " available current))))
+             (args (om-dash--forge-diff-args current desired
+                                              "--add-reviewer" "--remove-reviewer")))
+        (if (not args)
+            (message "Om-dash: reviewers unchanged")
+          (apply #'om-dash--gh-call "pr" "edit" url args)
+          (om-dash--forge-update-row-cells
+           (plist-get context :marker)
+           (list (cons "reviewer"
+                       (s-join "," (seq-map (lambda (login) (format "@%s" login))
+                                            desired)))))
+          (message "Om-dash: reviewers of %s: %s" url
+                   (if desired (s-join ", " desired) "none")))))))
+
+(defun om-dash--github-set-parent (context)
+  "Set parent issue of the issue in CONTEXT.
+The parent is read in the minibuffer as issue number (same repository)
+or URL, starting with the current one from “parent“ cell; empty input
+removes the parent.  Then “parent“ cell of the row is updated (the
+block is not refreshed).  Pull requests and draft issues have no
+parents."
+  (let ((target (om-dash--github-row-target (om-dash--github-url context))))
+    (if (not (eq (plist-get target :kind) 'issue))
+        (om-dash--forge-unsupported 'github "parents of pull requests and draft issues"
+                                    "only issues have parents")
+      (let* ((url (plist-get target :url))
+             (current (or (om-dash--row-field (om-dash--table-row-values) "parent") ""))
+             (parent (s-trim (read-string "Parent issue (number or URL, empty to remove): "
+                                          current))))
+        (if (equal parent current)
+            (message "Om-dash: parent unchanged")
+          (if (s-blank-p parent)
+              (om-dash--gh-call "issue" "edit" url "--remove-parent")
+            (om-dash--gh-call "issue" "edit" url "--parent" (s-chop-prefix "#" parent)))
+          (let* ((parent-url (cond ((s-blank-p parent) nil)
+                                   ((string-match-p "\\`https://" parent) parent)
+                                   (t (format "https://github.com/%s/issues/%s"
+                                              (plist-get target :repo)
+                                              (s-chop-prefix "#" parent)))))
+                 (parent-number (when (and parent-url
+                                           (string-match "/issues/\\([0-9]+\\)" parent-url))
+                                  (format "#%s" (match-string 1 parent-url)))))
+            (om-dash--forge-update-row-cells
+             (plist-get context :marker)
+             (list (cons "parent" (if parent-url
+                                      (org-link-make-string parent-url parent-number)
+                                    ""))))
+            (message "Om-dash: parent of %s: %s" url (or parent-number "none"))))))))
 
 (cl-defmethod om-dash-forge--create-item ((_backend (eql github)) context arg)
   "Create github issue from the new row in CONTEXT.
@@ -617,7 +794,7 @@ The current body is loaded into a buffer: \\<om-dash-edit-mode-map>\\[om-dash-ed
                (delete-file file)))
            (message "Om-dash: updated body of %s" url)))))))
 
-(cl-defmethod om-dash-forge--edit-labels ((_backend (eql github)) context)
+(defun om-dash--github-set-labels (context)
   "Edit labels of the issue or pull request in CONTEXT.
 
 Labels are read in the minibuffer, starting with the current ones,
@@ -651,7 +828,7 @@ have no labels."
           (message "Om-dash: labels of %s: %s" url
                    (if desired (s-join ", " desired) "none")))))))
 
-(cl-defmethod om-dash-forge--edit-assignees ((_backend (eql github)) context)
+(defun om-dash--github-set-assignees (context)
   "Edit assignees of the issue, pull request or draft in CONTEXT.
 
 Assignees are read in the minibuffer, starting with the current ones,

@@ -47,14 +47,13 @@
 ;; Forge commands work on the item (issue, pull request, draft) on the
 ;; current row of a forge block table (e.g. `om-dash-github'); the
 ;; backend is chosen by the name of the enclosing block.
-;; Command `om-dash-forge-set-status' changes status (for github, v2
-;; project status, e.g. Todo / In Progress) of the item at point.
-;; Commands `om-dash-forge-close-item', `om-dash-forge-reopen-item',
-;; and `om-dash-forge-toggle-item-state' close or reopen it.
+;; Command `om-dash-forge-set-field' changes the field of the item at
+;; point shown in the column at point (for github: state, title,
+;; status, tags, assignee, reviewer, milestone, parent); other columns
+;; can't be changed.
 ;; Commands `om-dash-forge-create-item' and `om-dash-forge-create-draft'
 ;; create an item from a new row typed into the table.
-;; Commands `om-dash-forge-edit-body', `om-dash-forge-edit-labels', and
-;; `om-dash-forge-edit-assignees' edit the item on the current row.
+;; Command `om-dash-forge-edit-body' edits its body in a buffer.
 ;; Command `om-dash-forge-delete-item' removes it from the project, or
 ;; with prefix argument deletes it permanently.
 
