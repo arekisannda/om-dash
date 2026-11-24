@@ -126,6 +126,16 @@ read (e.g. with completion); other columns are an error."
   (ignore context arg)
   (error "Om-dash: %s backend doesn't implement create-draft" backend))
 
+(cl-defgeneric om-dash-forge--set-parent (backend context)
+  "Set parent of the item in CONTEXT (e.g. parent issue of a sub-issue)."
+  (ignore context)
+  (error "Om-dash: %s backend doesn't implement set-parent" backend))
+
+(cl-defgeneric om-dash-forge--convert-draft (backend context)
+  "Convert the draft in CONTEXT to an item (e.g. issue)."
+  (ignore context)
+  (error "Om-dash: %s backend doesn't implement convert-draft" backend))
+
 (cl-defgeneric om-dash-forge--edit-body (backend context)
   "Edit body of the item in CONTEXT."
   (ignore context)
@@ -176,6 +186,23 @@ see `om-dash-forge--create-draft'."
   (om-dash--forge-call #'om-dash-forge--create-draft arg))
 
 ;;;###autoload
+(defun om-dash-forge-set-parent ()
+  "Set parent of the item on the current row (e.g. parent issue).
+Unlike `om-dash-forge-set-field' on “parent“ column, works anywhere
+on the row, also when the table doesn't show parents.  See
+`om-dash-forge--set-parent'."
+  (interactive)
+  (om-dash--forge-call #'om-dash-forge--set-parent))
+
+;;;###autoload
+(defun om-dash-forge-convert-draft ()
+  "Convert the draft on the current row to an item (e.g. issue).
+How the item is created (e.g. which repository) depends on the
+backend, see `om-dash-forge--convert-draft'."
+  (interactive)
+  (om-dash--forge-call #'om-dash-forge--convert-draft))
+
+;;;###autoload
 (defun om-dash-forge-edit-body ()
   "Edit body of the item on the current row in a buffer.
 See `om-dash-forge--edit-body'."
@@ -198,6 +225,8 @@ With prefix ARG, delete the item permanently instead.  See
 (define-key om-dash-command-map (kbd "N") #'om-dash-forge-create-draft)
 (define-key om-dash-command-map (kbd "e") #'om-dash-forge-edit-body)
 (define-key om-dash-command-map (kbd "d") #'om-dash-forge-delete-item)
+(define-key om-dash-command-map (kbd "c") #'om-dash-forge-convert-draft)
+(define-key om-dash-command-map (kbd "p") #'om-dash-forge-set-parent)
 
 (provide 'om-dash-forge-commands)
 ;;; om-dash-forge-commands.el ends here

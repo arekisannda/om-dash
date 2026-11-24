@@ -505,7 +505,7 @@ the row is updated (the block is not refreshed)."
   (let ((target (om-dash--github-row-target (om-dash--github-url context))))
     (if (eq (plist-get target :kind) 'draft)
         (om-dash--forge-unsupported 'github "state of draft issues"
-                                    "convert to issue first")
+                                    "convert to issue first with `om-dash-forge-convert-draft'")
       (let* ((kind (om-dash--github-gh-kind target))
              (url (plist-get target :url))
              (current (s-trim (om-dash--gh-call kind "view" url
@@ -674,16 +674,25 @@ block is not refreshed).  Issues and draft issues have no reviewers."
 (defun om-dash--github-set-parent (context)
   "Set parent issue of the issue in CONTEXT.
 The parent is read in the minibuffer as issue number (same repository)
-or URL, starting with the current one from “parent“ cell; empty input
-removes the parent.  Then “parent“ cell of the row is updated (the
-block is not refreshed).  Pull requests and draft issues have no
+or URL, starting with the current one (queried from github); empty
+input removes the parent.  Then “parent“ cell of the row is updated,
+if the table has it (the block is not refreshed, so nesting of titles
+changes only after refresh).  Pull requests and draft issues have no
 parents."
   (let ((target (om-dash--github-row-target (om-dash--github-url context))))
     (if (not (eq (plist-get target :kind) 'issue))
         (om-dash--forge-unsupported 'github "parents of pull requests and draft issues"
                                     "only issues have parents")
       (let* ((url (plist-get target :url))
-             (current (or (om-dash--row-field (om-dash--table-row-values) "parent") ""))
+             (current-url (s-trim (om-dash--gh-call "issue" "view" url
+                                                    "--json" "parent"
+                                                    "--jq" ".parent.url // \"\"")))
+             ;; same repository: “#N“, otherwise URL
+             (current (if (string-match (format "\\`https://github\\.com/%s/issues/\\([0-9]+\\)\\'"
+                                                (regexp-quote (plist-get target :repo)))
+                                        current-url)
+                          (format "#%s" (match-string 1 current-url))
+                        current-url))
              (parent (s-trim (read-string "Parent issue (number or URL, empty to remove): "
                                           current))))
         (if (equal parent current)
@@ -762,6 +771,54 @@ title linking to the new draft.  Refresh the block later."
   (if arg
       (om-dash--github-create-issue-from-row context)
     (om-dash--github-create-draft-from-row context)))
+
+(cl-defmethod om-dash-forge--set-parent ((_backend (eql github)) context)
+  "Set parent issue of the issue in CONTEXT.
+Works whether or not the table has “parent“ column; see
+`om-dash--github-set-parent'."
+  (om-dash--github-set-parent context))
+
+(cl-defmethod om-dash-forge--convert-draft ((_backend (eql github)) context)
+  "Convert the draft issue in CONTEXT to a github issue.
+
+The repository is taken from “repo“ cell of the row, then `:repo' block
+parameter, otherwise you're asked to choose one (with completion over
+repositories found in the table).  The conversion is confirmed if
+`om-dash-github-confirm-changes' is non-nil.
+
+The project item stays the same, so status, title, body and assignees
+are kept.  Then the row is updated in place: state, number, title link
+and repository (the block is not refreshed)."
+  (let ((target (om-dash--github-row-target (om-dash--github-url context))))
+    (unless (eq (plist-get target :kind) 'draft)
+      (user-error "Om-dash: %s is not a draft issue" (plist-get target :url)))
+    (let* ((params (plist-get context :params))
+           (values (om-dash--table-row-values))
+           (title (s-trim (or (om-dash--row-field values "title") "")))
+           (repo (om-dash--github-choose-repo params values))
+           (_ (om-dash--github-confirm (format "Convert draft %S to issue in" title) repo))
+           (repo-id (s-trim (om-dash--gh-call "api" (format "repos/%s" repo)
+                                              "--jq" ".node_id")))
+           (json (json-parse-string
+                  (om-dash--gh-call
+                   "api" "graphql"
+                   "-f" (s-concat "query=mutation($item: ID!, $repo: ID!) { "
+                                  "convertProjectV2DraftIssueItemToIssue("
+                                  "input: {itemId: $item, repositoryId: $repo}) { "
+                                  "item { content { ... on Issue { number url title } } } } }")
+                   "-f" (s-concat "item=" (plist-get target :item-id))
+                   "-f" (s-concat "repo=" repo-id))
+                  :object-type 'alist :null-object nil))
+           (issue (or (let-alist json .data.convertProjectV2DraftIssueItemToIssue.item.content)
+                      (user-error "Om-dash: can't find converted issue in gh output")))
+           (marker (plist-get context :marker)))
+      (let-alist issue
+        (om-dash--forge-update-row-cells
+         marker (list (cons "state" "OPEN")
+                      (cons "no." (org-link-make-string .url (format "#%s" .number)))
+                      (cons "repo" repo)))
+        (om-dash--github-update-title-cell marker .url .title .title)
+        (message "Om-dash: converted draft to %s" .url)))))
 
 (cl-defmethod om-dash-forge--edit-body ((_backend (eql github)) context)
   "Edit body of the issue, pull request or draft in CONTEXT.

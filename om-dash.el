@@ -50,9 +50,11 @@
 ;; Command `om-dash-forge-set-field' changes the field of the item at
 ;; point shown in the column at point (for github: state, title,
 ;; status, tags, assignee, reviewer, milestone, parent); other columns
-;; can't be changed.
+;; can't be changed.  Command `om-dash-forge-set-parent' sets the
+;; parent issue also when the table doesn't show parents.
 ;; Commands `om-dash-forge-create-item' and `om-dash-forge-create-draft'
-;; create an item from a new row typed into the table.
+;; create an item from a new row typed into the table, and
+;; `om-dash-forge-convert-draft' converts a draft to an item.
 ;; Command `om-dash-forge-edit-body' edits its body in a buffer.
 ;; Command `om-dash-forge-delete-item' removes it from the project, or
 ;; with prefix argument deletes it permanently.
