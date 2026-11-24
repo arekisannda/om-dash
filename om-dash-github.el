@@ -1362,6 +1362,49 @@ Closed issues are not shown (they don't block anything)."
       (`any "issues and pull requests")
       (_ (user-error "Om-dash: bad type %S" type)))))
 
+(defun om-dash--github-check-title-template (template)
+  "Validate TEMPLATE (`:title-template' parameter) and return it.
+See `org-dblock-write:om-dash-github' for the format."
+  (when template
+    (unless (and (listp template)
+                 (seq-every-p (lambda (part)
+                                (or (keywordp part)
+                                    (and (consp part)
+                                         (stringp (car part))
+                                         (keywordp (cadr part))
+                                         (null (cddr part)))))
+                              template))
+      (user-error "Om-dash: bad :title-template %S (expected a list of :column or (\"FORMAT\" :column))"
+                  template))
+    ;; editing titles (see `om-dash--github-update-title-cell') keeps
+    ;; text before the title, so the title must be the last part
+    (unless (eq (car (last template)) :title)
+      (user-error "Om-dash: :title-template must end with :title, got %S" template))
+    (when (seq-find (lambda (part) (memq (if (consp part) (cadr part) part)
+                                         '(:title-link)))
+                    template)
+      (user-error "Om-dash: :title-template can't contain :title-link (use :title)"))
+    template))
+
+(defun om-dash--github-template-columns (template)
+  "Return columns used by title TEMPLATE (so that their data is fetched)."
+  (seq-map (lambda (part) (if (consp part) (cadr part) part)) template))
+
+(defun om-dash--github-apply-title-template (template title make-cell)
+  "Build title text from TEMPLATE, with TITLE for `:title'.
+Other parts are cell texts made by MAKE-CELL (function of column);
+parts with empty text are left out.  Without TEMPLATE, return TITLE."
+  (if (not template)
+      title
+    (mapconcat (lambda (part)
+                 (let* ((format-string (if (consp part) (car part) "%s"))
+                        (column (if (consp part) (cadr part) part))
+                        (text (if (eq column :title)
+                                  title
+                                (om-dash--cell-text (funcall make-cell column)))))
+                   (if (s-blank-p text) "" (format format-string text))))
+               template "")))
+
 (defun om-dash--github-nested-title (title depth)
   "Format TITLE of a sub-issue at nesting DEPTH (0 for top-level rows)."
   (if (and title (> depth 0))
@@ -1426,6 +1469,9 @@ Parameters:
                          Default: `asc'.
   :sub-issues            `nest' sub-issues under parent, or `flat'.
                          Default: `nest'.
+  :title-template        Parts of title cell, e.g. adding sub-issue
+                         progress before the title (see below).
+                         Default: nil (title only).
   :fields                Explicitly specify list of fields.
                          Default: `om-dash-github-fields'.
   :limit                 Limit number of results.
@@ -1620,6 +1666,19 @@ set once on a parent heading and reused by all child blocks:
 With “:OM_DASH_HEADING: t“, the block sets todo keyword of the heading
 it's under (see `om-dash--heading-property').
 
+`:title-template' is a list of parts that make up title cell (of
+`:title' and `:title-link' columns).  A part is a column keyword (its
+cell text is inserted) or (FORMAT COLUMN) (inserted with `format').
+Parts with empty text are left out, including their FORMAT.  The list
+must end with `:title'.  Columns used in the template are fetched even
+if not displayed.  Sub-issue nesting is added before the result.  E.g.
+to show sub-issue progress:
+
+  :title-template ((“[%s] “ :sub-issues) :title)
+
+gives “[2/5] Set up cluster“ for issues with sub-issues, and the plain
+title for others.
+
 `:sub-issues' controls how sub-issues are shown (project mode only, since
 `gh issue list' doesn't report parents).  With `nest' (default), a
 sub-issue is shown right after its parent, with title indented by
@@ -1738,7 +1797,13 @@ parameter explicitly."
          (sub-issues (or (plist-get params :sub-issues) 'nest))
          (_ (unless (memq sub-issues '(nest flat))
               (user-error "Om-dash: bad :sub-issues %S (use `nest' or `flat')"
-                          sub-issues))))
+                          sub-issues)))
+         (title-template (om-dash--github-check-title-template
+                          (plist-get params :title-template)))
+         ;; columns whose data must be fetched: displayed, or used in title
+         (fetch-columns (seq-uniq (append table-columns
+                                          (om-dash--github-template-columns
+                                           title-template)))))
     ;; validation and defaults
     (when (and (or open-filter closed-filter)
                any-filter)
@@ -1750,10 +1815,10 @@ parameter explicitly."
                            (om-dash--github-read-project-topics
                             owner owner-type project status-field
                             type any-filter open-filter closed-filter
-                            sort-by limit table-columns)
+                            sort-by limit fetch-columns)
                          (om-dash--github-read-topics
                           repo type any-filter open-filter closed-filter
-                          sort-by fields table-columns limit)))
+                          sort-by fields fetch-columns limit)))
            (parsed-output (json-read-from-string raw-output))
            (column-names
             (seq-map (lambda (col)
@@ -1815,8 +1880,9 @@ parameter explicitly."
                       (reviewer (om-dash--github-format-reviewer json))
                       (v2-project (om-dash--github-format-v2-project json))
                       (classic-project (om-dash--github-format-classic-project json))
-                      (title (om-dash--github-nested-title
-                              (cdr (assoc 'title json)) depth))
+                      ;; final title (template, nesting) is set below,
+                      ;; after `make-cell' that it uses
+                      (title (cdr (assoc 'title json)))
                       (url (cdr (assoc 'url json)))
                       (created-at (om-dash--github-format-timestamp
                                    (cdr (assoc 'createdAt json))))
@@ -1856,6 +1922,10 @@ parameter explicitly."
                                 (`:closed-at (make-om-dash--cell :text closed-at))
                                 (`:merged-at (make-om-dash--cell :text merged-at))
                                 (_ (user-error "Om-dash: unknown table column %S" col)))))
+                  (setq title (om-dash--github-nested-title
+                               (om-dash--github-apply-title-template
+                                title-template title make-cell)
+                               depth))
                   ;; group key: sub-issues use the key of their top-level
                   ;; parent, so that each tree stays within one group
                   (when (and group-by (eq depth 0))
