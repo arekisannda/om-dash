@@ -387,7 +387,10 @@ Join resulting list into one string using a separator and return result."
 When the heading containing an om-dash block has this property set
 \(e.g. “:OM_DASH_HEADING: t“), updating the block sets todo keyword of
 that heading to reflect the block's state: e.g. “TODO“ if there are
-open topics, “DONE“ otherwise.  Headings without it are never touched.")
+open topics, “DONE“ otherwise.  If the heading text also has a progress
+marker “{/}“ or “{%}“, blocks that support it (e.g. `om-dash-github')
+replace it with their progress, e.g. “{3/7}“ or “{43%}“.  Headings
+without the property are never touched.")
 
 (defun om-dash--heading-enabled-p ()
   "Check if heading at point has `om-dash--heading-property' enabled."
@@ -414,6 +417,37 @@ regenerating a block doesn't add notes or fail on blocked tasks."
             (org-trigger-hook nil)
             (org-after-todo-state-change-hook nil))
         (org-todo keyword)))))
+
+(defconst om-dash--progress-regexp "{\\(?:[0-9]*/[0-9]*\\|[0-9]*%\\)}"
+  "Regexp of progress marker in heading text: “{/}“, “{3/7}“, “{%}“, “{43%}“.
+Curly braces are used because org recomputes its own “[/]“ cookies
+from checkboxes and child headings, and would overwrite the value.")
+
+(defun om-dash--heading-progress-p ()
+  "Check if the heading containing the current block shows progress.
+True if the heading has “:OM_DASH_HEADING: t“ property and a progress
+marker (see `om-dash--progress-regexp') in its text."
+  (save-excursion
+    (and (ignore-errors (org-back-to-heading t) t)
+         (om-dash--heading-enabled-p)
+         (re-search-forward om-dash--progress-regexp (line-end-position) t)
+         t)))
+
+(defun om-dash--update-heading-progress (done total)
+  "Set progress marker of the heading containing the current block.
+DONE and TOTAL are numbers of done and all items of the block.  The
+marker is replaced with “{DONE/TOTAL}“ or, if it's a percentage marker,
+“{PERCENT%}“.  Nothing is done if the heading has no marker or no
+“:OM_DASH_HEADING: t“ property (see `om-dash--heading-property')."
+  (save-excursion
+    (when (and (ignore-errors (org-back-to-heading t) t)
+               (om-dash--heading-enabled-p)
+               (re-search-forward om-dash--progress-regexp (line-end-position) t))
+      (let ((new (if (string-suffix-p "%}" (match-string 0))
+                     (format "{%d%%}" (if (> total 0) (round (* 100.0 done) total) 0))
+                   (format "{%d/%d}" done total))))
+        (unless (equal new (match-string 0))
+          (replace-match new t t))))))
 
 (defun om-dash--insert-heading (keyword _headline _level)
   "Update todo keyword of the heading containing the current block.

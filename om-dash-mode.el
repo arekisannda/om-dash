@@ -216,6 +216,36 @@ Assumes that om-dash--table-field-p returned true."
             (om-dash--fontify beg (1- pos) face)))
         (setq beg pos)))))
 
+(defun om-dash--progress-done-p (marker)
+  "Check if progress MARKER (e.g. “{7/7}“ or “{100%}“) is complete.
+Markers without numbers (“{/}“, “{%}“) are not complete."
+  (cond
+   ((string-match "\\`{\\([0-9]+\\)/\\([0-9]+\\)}\\'" marker)
+    (let ((done (string-to-number (match-string 1 marker)))
+          (total (string-to-number (match-string 2 marker))))
+      (and (> total 0) (= done total))))
+   ((string-match "\\`{\\([0-9]+\\)%}\\'" marker)
+    (= (string-to-number (match-string 1 marker)) 100))))
+
+(defun om-dash--progress-font-lock-hook (limit)
+  "Apply faces to progress markers of headings up to LIMIT.
+Only headings with “:OM_DASH_HEADING: t“ are fontified (see
+`om-dash--heading-progress-p').  Org's faces of statistics cookies
+are used: `org-checkbox-statistics-done' when complete, otherwise
+`org-checkbox-statistics-todo'."
+  (while (re-search-forward om-dash--progress-regexp limit t)
+    (let ((beg (match-beginning 0))
+          (end (match-end 0))
+          (marker (match-string-no-properties 0)))
+      (when (save-excursion
+              (goto-char beg)
+              (and (org-at-heading-p)
+                   (om-dash--heading-enabled-p)))
+        (om-dash--fontify beg end (if (om-dash--progress-done-p marker)
+                                      'org-checkbox-statistics-done
+                                    'org-checkbox-statistics-todo)))))
+  nil)
+
 (defun om-dash--font-lock-hook (limit)
   "Find tables and cells and apply faces."
   (let ((om-dash--status-faces-cache (make-hash-table))
@@ -325,14 +355,17 @@ local variables, e.g. add this to the end of the file:
       (progn
         ;; rebuild regexps from user configuration
         (om-dash--rebuild-regexps)
-        ;; register font-lock hook
-        (font-lock-add-keywords nil '((om-dash--font-lock-hook)) t)
+        ;; register font-lock hooks
+        (font-lock-add-keywords nil '((om-dash--font-lock-hook)
+                                      (om-dash--progress-font-lock-hook))
+                                t)
         ;; refontify buffer
         (save-excursion
           (widen)
           (font-lock-flush)))
-    ;; unregister font-lock hook
-    (font-lock-remove-keywords nil '((om-dash--font-lock-hook)))
+    ;; unregister font-lock hooks
+    (font-lock-remove-keywords nil '((om-dash--font-lock-hook)
+                                     (om-dash--progress-font-lock-hook)))
     ;; clear local variables
     (setq-local om-dash--keyword-regexp nil)
     ;; refontify buffer

@@ -1469,6 +1469,9 @@ Parameters:
                          Default: `asc'.
   :sub-issues            `nest' sub-issues under parent, or `flat'.
                          Default: `nest'.
+  :done-statuses         Project statuses counted as done in heading
+                         progress (see below).
+                         Default: (“Done“).
   :title-template        Parts of title cell, e.g. adding sub-issue
                          progress before the title (see below).
                          Default: nil (title only).
@@ -1664,7 +1667,17 @@ set once on a parent heading and reused by all child blocks:
   #+END:
 
 With “:OM_DASH_HEADING: t“, the block sets todo keyword of the heading
-it's under (see `om-dash--heading-property').
+it's under (see `om-dash--heading-property').  If the heading text also
+has a progress marker “{/}“ or “{%}“, it's replaced with the block's
+progress, e.g. “{3/7}“ or “{43%}“: the number of done items of all
+items.  An item is done if it's closed or merged, or if its project
+status is one of `:done-statuses' (default “Done“); each item counts
+once, sub-issues included.  E.g.:
+
+  ** TODO Cluster work {/}
+  :PROPERTIES:
+  :OM_DASH_HEADING: t
+  :END:
 
 `:title-template' is a list of parts that make up title cell (of
 `:title' and `:title-link' columns).  A part is a column keyword (its
@@ -1800,10 +1813,19 @@ parameter explicitly."
                           sub-issues)))
          (title-template (om-dash--github-check-title-template
                           (plist-get params :title-template)))
-         ;; columns whose data must be fetched: displayed, or used in title
+         (done-statuses (or (plist-get params :done-statuses) '("Done")))
+         (_ (unless (and (listp done-statuses) (seq-every-p #'stringp done-statuses))
+              (user-error "Om-dash: bad :done-statuses %S (expected a list of strings)"
+                          done-statuses)))
+         ;; heading progress (see `om-dash--heading-progress-p') needs
+         ;; project status of items
+         (progress-p (om-dash--heading-progress-p))
+         ;; columns whose data must be fetched: displayed, used in title,
+         ;; or needed for heading progress
          (fetch-columns (seq-uniq (append table-columns
                                           (om-dash--github-template-columns
-                                           title-template)))))
+                                           title-template)
+                                          (when progress-p '(:project-status))))))
     ;; validation and defaults
     (when (and (or open-filter closed-filter)
                any-filter)
@@ -1847,7 +1869,9 @@ parameter explicitly."
            table
            todo-p
            make-cell
-           root-group-key)
+           root-group-key
+           (done-count 0)
+           (total-count 0))
       (seq-do (lambda (entry)
                 (let* ((json (car entry))
                        (depth (cdr entry))
@@ -1894,6 +1918,15 @@ parameter explicitly."
                                   (cdr (assoc 'mergedAt json)))))
                   (if (seq-contains-p (om-dash--todo-keywords) state)
                       (setq todo-p t))
+                  ;; heading progress: each item counts once, as done if
+                  ;; it's closed/merged or has one of done statuses
+                  (setq total-count (1+ total-count))
+                  (when (or (member state '("CLOSED" "MERGED"))
+                            (seq-some (lambda (item)
+                                        (member (cdr (assoc 'name (cdr (assoc 'status item))))
+                                                done-statuses))
+                                      (cdr (assoc 'projectItems json))))
+                    (setq done-count (1+ done-count)))
                   (setq make-cell
                         (lambda (col)
                               (pcase col
@@ -1946,6 +1979,7 @@ parameter explicitly."
       (om-dash--insert-heading (or keyword
                                    (om-dash--choose-keyword todo-p))
                                headline heading-level)
+      (om-dash--update-heading-progress done-count total-count)
       (om-dash--insert-table column-names
                              (seq-map #'cdr table)
                              heading-level
