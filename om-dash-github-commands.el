@@ -286,6 +286,36 @@ of drafts, so this uses `updateProjectV2DraftIssue' GraphQL mutation."
                    (om-dash--jq-str draft-id)
                    (mapconcat #'om-dash--jq-str ids ", "))))))
 
+(defun om-dash--github-issue-ref (ref repo)
+  "Return issue REF in the form gh accepts: number or URL.
+REF is “#N“, “N“, “owner/repo#N“ or URL; issues of REPO become a
+number, issues of other repositories a URL."
+  (let ((ref (s-trim ref)))
+    (cond
+     ((string-match "\\`#?\\([0-9]+\\)\\'" ref)
+      (match-string 1 ref))
+     ((or (string-match "\\`\\([^/# ]+/[^/# ]+\\)#\\([0-9]+\\)\\'" ref)
+          (string-match "\\`https://github\\.com/\\([^/]+/[^/]+\\)/issues/\\([0-9]+\\)\\'" ref))
+      (if (equal (match-string 1 ref) repo)
+          (match-string 2 ref)
+        (format "https://github.com/%s/issues/%s" (match-string 1 ref) (match-string 2 ref))))
+     (t
+      (user-error "Om-dash: bad issue reference %S (use #N, owner/repo#N or URL)" ref)))))
+
+(defun om-dash--github-issue-display (ref repo)
+  "Return issue REF as shown in tables: “#N“ for REPO, else “owner/repo#N“.
+See `om-dash--github-issue-ref' for REF forms."
+  (let ((gh-ref (om-dash--github-issue-ref ref repo)))
+    (if (string-match "github\\.com/\\([^/]+/[^/]+\\)/issues/\\([0-9]+\\)" gh-ref)
+        (format "%s#%s" (match-string 1 gh-ref) (match-string 2 gh-ref))
+      (format "#%s" gh-ref))))
+
+(defun om-dash--github-issue-refs-arg (cell repo)
+  "Return comma-separated gh issue refs for table CELL like “#9,#11“, or nil.
+REPO is the repository of the row."
+  (when-let* ((refs (om-dash--split-list cell ", ")))
+    (s-join "," (seq-map (lambda (ref) (om-dash--github-issue-ref ref repo)) refs))))
+
 (defun om-dash--github-create-issue-from-row (context)
   "Create github issue from the table row at point.
 CONTEXT is forge context of the row.  See `om-dash-forge--create-item'."
@@ -298,6 +328,10 @@ CONTEXT is forge context of the row.  See `om-dash-forge--create-item'."
                            (om-dash--row-field values "assignee") ", "))
                (milestone (om-dash--row-field values "milestone"))
                (parent (om-dash--row-field values "parent"))
+               (blocked-by (om-dash--github-issue-refs-arg
+                            (om-dash--row-field values "blocked-by") repo))
+               (blocking (om-dash--github-issue-refs-arg
+                          (om-dash--row-field values "blocking") repo))
                (status (om-dash--row-field values "status"))
                (project (om-dash--github-block-project params)))
     (om-dash--github-confirm (format "Create issue %S in" title) repo)
@@ -312,7 +346,9 @@ CONTEXT is forge context of the row.  See `om-dash-forge--create-item'."
                                      assignees)
                              (when milestone (list "--milestone" milestone))
                              ;; gh takes a number (same repository) or URL
-                             (when parent (list "--parent" (s-chop-prefix "#" parent))))))
+                             (when parent (list "--parent" (s-chop-prefix "#" parent)))
+                             (when blocked-by (list "--blocked-by" blocked-by))
+                             (when blocking (list "--blocking" blocking)))))
              (url (or (seq-find (lambda (line)
                                   (string-match-p "\\`https://" line))
                                 (reverse (s-lines (s-trim output))))
@@ -424,8 +460,11 @@ Columns that can be changed:
              `om-dash--github-set-reviewers'.
   milestone  Milestone, see `om-dash--github-set-milestone'.
   parent     Parent issue, see `om-dash--github-set-parent'.
+  blocked-by Open issues blocking this one, see
+             `om-dash--github-set-blocked-by'.
 
-Other columns can't be changed (an error): “no.“, “author“,
+Other columns can't be changed (an error): “blocking“ (set
+“blocked-by“ of the blocked issue instead), “no.“, “author“,
 “sub-issues“ (computed from sub-issues), timestamps, “repo“ (moving
 an issue to another repository changes its number), and “project“
 \(adding and removing items isn't a field change; see
@@ -439,7 +478,57 @@ an issue to another repository changes its number), and “project“
     ("reviewer" (om-dash--github-set-reviewers context))
     ("milestone" (om-dash--github-set-milestone context))
     ("parent" (om-dash--github-set-parent context))
+    ("blocked-by" (om-dash--github-set-blocked-by context))
+    ("blocking" (user-error "Om-dash: column \"blocking\" can't be changed; set \"blocked-by\" of the blocked issue instead"))
     (_ (user-error "Om-dash: column %S can't be changed" column))))
+
+(defun om-dash--github-set-blocked-by (context)
+  "Edit open issues blocking the issue in CONTEXT (“blocked by“).
+
+The issues are read in the minibuffer, starting with the current open
+ones (queried from github), with completion over issue numbers in the
+table; separate them with commas.  Use “#N“ for issues of the same
+repository, “owner/repo#N“ or URL for others.  Relations are added and
+removed accordingly; closed blocking issues are left as they are.
+Then “blocked-by“ cell of the row is updated, if the table has it (the
+block is not refreshed).  Pull requests and draft issues have no
+dependencies."
+  (let ((target (om-dash--github-row-target (om-dash--github-url context))))
+    (if (not (eq (plist-get target :kind) 'issue))
+        (om-dash--forge-unsupported 'github "dependencies of pull requests and draft issues"
+                                    "only issues can be blocked")
+      (let* ((url (plist-get target :url))
+             (repo (plist-get target :repo))
+             (current (seq-map
+                       (lambda (ref) (om-dash--github-issue-display ref repo))
+                       (seq-remove #'s-blank-p
+                                   (s-lines (s-trim
+                                             (om-dash--gh-call
+                                              "issue" "view" url "--json" "blockedBy"
+                                              "--jq" (s-concat
+                                                      ".blockedBy.nodes[] "
+                                                      "| select(.state == \"OPEN\") "
+                                                      "| \"\\(.repository.nameWithOwner)#\\(.number)\"")))))))
+             (desired (seq-map (lambda (ref) (om-dash--github-issue-display ref repo))
+                               (om-dash--forge-read-list
+                                "Blocked by: "
+                                ;; an issue can't block itself
+                                (remove (when (string-match "/issues/\\([0-9]+\\)" url)
+                                          (format "#%s" (match-string 1 url)))
+                                        (om-dash--table-column-values "no."))
+                                current)))
+             (args (om-dash--forge-diff-args
+                    (seq-map (lambda (ref) (om-dash--github-issue-ref ref repo)) current)
+                    (seq-map (lambda (ref) (om-dash--github-issue-ref ref repo)) desired)
+                    "--add-blocked-by" "--remove-blocked-by")))
+        (if (not args)
+            (message "Om-dash: blocked-by unchanged")
+          (apply #'om-dash--gh-call "issue" "edit" url args)
+          (om-dash--forge-update-row-cells
+           (plist-get context :marker)
+           (list (cons "blocked-by" (s-join "," desired))))
+          (message "Om-dash: %s is blocked by: %s" url
+                   (if desired (s-join ", " desired) "none")))))))
 
 (defun om-dash--github-set-status (context)
   "Set v2 project status of the issue, pull request or draft in CONTEXT.
@@ -731,6 +820,8 @@ Cells are matched by table header:
   tags       Labels, e.g. “:bug:ui:“ or “bug,ui“.
   milestone  Milestone title.
   parent     Parent issue, e.g. “#12“ (same repository) or URL.
+  blocked-by Issues blocking the new one, e.g. “#9,owner/repo#11“.
+  blocking   Issues blocked by the new one, e.g. “#14“.
   status     Project status (only if block has a v2 project).
 
 Other cells are ignored.  If there is no “repo“ cell, `:repo' block

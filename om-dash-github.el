@@ -48,6 +48,8 @@ Supported values:
 | :repo                   | owner/repo        |
 | :parent                 | #12               |
 | :sub-issues             | 2/5               |
+| :blocked-by             | #9,owner/repo#11  |
+| :blocking               | #14               |
 | :title                  | text              |
 | :title-link             | [[link][text]]    |
 | :milestone              | 1.2.3             |
@@ -313,6 +315,10 @@ using `:project-status-field' parameter."
    'not (list
          (when (seq-contains-p table-columns :reviewer)
            "reviewRequests")
+         (when (seq-contains-p table-columns :blocked-by)
+           "blockedBy")
+         (when (seq-contains-p table-columns :blocking)
+           "blocking")
          (when (or (seq-contains-p table-columns :project)
                    (seq-contains-p table-columns :project-status))
            "projectItems")
@@ -333,13 +339,19 @@ using `:project-status-field' parameter."
                       (apply 'append
                              (seq-map
                               (lambda (type)
-                                (list
-                                 (om-dash--gh-build-command ;  :any
-                                  repo type 'any any-filter fields extra-fields limit)
-                                 (om-dash--gh-build-command ;  :open
-                                  repo type 'open open-filter fields extra-fields limit)
-                                 (om-dash--gh-build-command ;  :closed
-                                  repo type 'closed closed-filter fields extra-fields limit)))
+                                (let ((extra-fields
+                                       ;; pull requests have no issue relations
+                                       (if (eq type 'pullreq)
+                                           (seq-difference extra-fields
+                                                           '("blockedBy" "blocking"))
+                                         extra-fields)))
+                                  (list
+                                   (om-dash--gh-build-command ;  :any
+                                    repo type 'any any-filter fields extra-fields limit)
+                                   (om-dash--gh-build-command ;  :open
+                                    repo type 'open open-filter fields extra-fields limit)
+                                   (om-dash--gh-build-command ;  :closed
+                                    repo type 'closed closed-filter fields extra-fields limit))))
                               gh-types))))
          (gh-outputs
           (seq-map (lambda (_cmd) (make-temp-file "om-dash-"))
@@ -387,11 +399,22 @@ If FORCED-TYPE is non-nil, use it instead of auto-detection."
       (puthash owner type om-dash--github-owner-type-cache)
       type))))
 
-(defun om-dash--github-project-graphql (owner-type status-field)
+(defun om-dash--github-project-graphql (owner-type status-field table-columns)
   "Build GraphQL query that lists all items of a v2 project.
 Includes issues (with parent and sub-issue summary), pull requests,
-and draft issues."
-  (let* ((common-fields
+and draft issues.  Issue relations (blocked by, blocking) are included
+only if TABLE-COLUMNS shows them."
+  (let* ((relation-fields
+          "nodes { number url state repository { nameWithOwner } } totalCount")
+         (issue-relations
+          (s-concat
+           (if (seq-contains-p table-columns :blocked-by)
+               (format "blockedBy(first: 50) { %s } " relation-fields)
+             "")
+           (if (seq-contains-p table-columns :blocking)
+               (format "blocking(first: 50) { %s } " relation-fields)
+             "")))
+         (common-fields
           (s-concat
            "number title url state createdAt updatedAt closedAt "
            "repository { nameWithOwner } author { login } "
@@ -410,7 +433,7 @@ and draft issues."
             "content { __typename "
             "... on Issue { %s "
             "parent { url number } "
-            "subIssuesSummary { total completed } } "
+            "subIssuesSummary { total completed } %s} "
             "... on PullRequest { %s "
             "mergedAt isDraft reviewDecision "
             "reviewRequests(first: 20) { nodes { requestedReviewer { "
@@ -422,6 +445,7 @@ and draft issues."
             "} } } }")
            (om-dash--gh-quote-arg status-field)
            common-fields
+           issue-relations
            common-fields)))
     (pcase owner-type
       (`viewer
@@ -463,6 +487,8 @@ and draft issues."
    " milestone: (.milestone // null),"
    " parent: (.parent // null),"
    " subIssuesSummary: (.subIssuesSummary // null),"
+   " blockedBy: (.blockedBy // null),"
+   " blocking: (.blocking // null),"
    " reviewDecision: (.reviewDecision // \"\"),"
    " reviewRequests: [(.reviewRequests.nodes // [])[]"
    " | .requestedReviewer | select(. != null) | {login: (.login // .name)}],"
@@ -470,7 +496,8 @@ and draft issues."
    " projectItems: [{title: $p.title, status: {name: ($s.name // \"\")}}]}]")
   "Jq expression that converts paginated GraphQL output into a list of topics.
 The resulting objects have the same shape as `gh pr list --json' output,
-plus `parent' and `subIssuesSummary' for issues.  Draft issues have
+plus `parent', `subIssuesSummary', `blockedBy' and `blocking' for
+issues.  Draft issues have
 state “DRAFT“, no number, and url pointing to the project item.")
 
 (defun om-dash--gh-split-terms (str separators)
@@ -637,10 +664,13 @@ qualifiers are ORed, everything else is ANDed, same as on github."
 
 (defun om-dash--github-read-project-topics (owner owner-type project status-field
                                                   type any-filter open-filter
-                                                  closed-filter sort-by limit)
-  "Read topics from v2 PROJECT of OWNER, without being bound to a repo."
+                                                  closed-filter sort-by limit
+                                                  table-columns)
+  "Read topics from v2 PROJECT of OWNER, without being bound to a repo.
+TABLE-COLUMNS decides which optional fields are queried."
   (let* ((owner-type (om-dash--github-owner-type owner owner-type))
-         (graphql (om-dash--github-project-graphql owner-type status-field))
+         (graphql (om-dash--github-project-graphql owner-type status-field
+                                                   table-columns))
          (fetch-command
           (format "gh api graphql --paginate -f %s %s-F %s | jq -s %s"
                   (om-dash--shell-quote (format "query=%s" graphql))
@@ -1253,6 +1283,24 @@ qualifiers are ORed, everything else is ANDed, same as on github."
     (when assignee-list
       (s-join "," assignee-list))))
 
+(defun om-dash--github-format-relations (connection repository)
+  "Format open issues of relation CONNECTION as “#9,owner/repo#11“.
+CONNECTION is like `blockedBy' of gh json: (nodes . TOTAL-COUNT) with
+nodes having `number', `state' and `repository'.  Issues of REPOSITORY
+are shown as “#N“, issues of other repositories as “owner/repo#N“.
+Closed issues are not shown (they don't block anything)."
+  (let ((open-nodes (seq-filter (lambda (node)
+                                  (equal (cdr (assoc 'state node)) "OPEN"))
+                                (cdr (assoc 'nodes connection)))))
+    (when (seq-first open-nodes)
+      (s-join "," (seq-map (lambda (node)
+                             (let ((node-repo (cdr (assoc 'nameWithOwner
+                                                          (cdr (assoc 'repository node))))))
+                               (if (or (not node-repo) (equal node-repo repository))
+                                   (format "#%s" (cdr (assoc 'number node)))
+                                 (format "%s#%s" node-repo (cdr (assoc 'number node))))))
+                           open-nodes)))))
+
 (defun om-dash--github-format-reviewer (json)
   "Format reviewer name(s) of github topic."
   (let ((reviewer-list (seq-uniq
@@ -1702,7 +1750,7 @@ parameter explicitly."
                            (om-dash--github-read-project-topics
                             owner owner-type project status-field
                             type any-filter open-filter closed-filter
-                            sort-by limit)
+                            sort-by limit table-columns)
                          (om-dash--github-read-topics
                           repo type any-filter open-filter closed-filter
                           sort-by fields table-columns limit)))
@@ -1715,6 +1763,8 @@ parameter explicitly."
                          (`:repo "repo")
                          (`:parent "parent")
                          (`:sub-issues "sub-issues")
+                         (`:blocked-by "blocked-by")
+                         (`:blocking "blocking")
                          ((or `:title `:title-link) '("title" . t))
                          (`:milestone "milestone")
                          (`:tags "tags")
@@ -1749,6 +1799,10 @@ parameter explicitly."
                           (when (and (numberp total) (> total 0))
                             (format "%s/%s" (cdr (assoc 'completed summary)) total))))
                       (repository (or (cdr (assoc 'repository json)) repo))
+                      (blocked-by (om-dash--github-format-relations
+                                   (cdr (assoc 'blockedBy json)) repository))
+                      (blocking (om-dash--github-format-relations
+                                 (cdr (assoc 'blocking json)) repository))
                       (milestone (cdr (assoc 'title
                                              (cdr (assoc 'milestone json)))))
                       (tags (om-dash--format-tags
@@ -1783,6 +1837,8 @@ parameter explicitly."
                                 (`:parent (make-om-dash--cell :text parent-number
                                                               :link parent-url))
                                 (`:sub-issues (make-om-dash--cell :text sub-issues-summary))
+                                (`:blocked-by (make-om-dash--cell :text blocked-by))
+                                (`:blocking (make-om-dash--cell :text blocking))
                                 (`:title (make-om-dash--cell :text title))
                                 (`:title-link (make-om-dash--cell :text title :link url))
                                 (`:milestone (make-om-dash--cell :text milestone))
