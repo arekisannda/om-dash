@@ -59,6 +59,9 @@
 ;; Command `om-dash-forge-delete-item' removes it from the project, or
 ;; with prefix argument deletes it permanently.
 
+;; Command `om-dash-help' shows a reference of all block parameters,
+;; properties and keys.
+
 ;; Block parameters can be given inline on the “#+BEGIN:“ line, or in
 ;; property drawers of enclosing headings, which allows to share common
 ;; configuration between blocks:
@@ -127,6 +130,7 @@
 ;;   om-dash-imap.el              IMAP folders block
 ;;   om-dash-command.el           shell command and elisp function blocks
 ;;   om-dash-mode.el              minor mode with highlighting and key bindings
+;;   om-dash-help.el              help buffer: reference of settings and keys
 
 ;;; Code:
 
@@ -141,6 +145,7 @@
 (require 'om-dash-imap)
 (require 'om-dash-command)
 (require 'om-dash-mode)
+(require 'om-dash-help)
 
 ;; Make byte compiler happy.
 (declare-function org-ql--normalize-query "org-ql" t t)
