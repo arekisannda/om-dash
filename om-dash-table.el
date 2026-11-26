@@ -27,6 +27,7 @@
 (require 'om-dash-core)
 (require 'org)
 (require 'org-table)
+(require 'cl-lib)
 (require 'seq)
 (require 's)
 
@@ -177,11 +178,52 @@ with the block they belong to."
         (setq pos (1+ pos))))
     (insert "|\n")))
 
-(defun om-dash--insert-table (column-names rows level &optional groups)
+(defconst om-dash--cookie-regexp "\\`<[lrc]?[0-9]*>\\'"
+  "Regexp of org column cookie, e.g. “<20>“, “<r>“, “<l10>“.")
+
+(defun om-dash--column-cookies (params columns &optional partial)
+  "Return list of org column cookies for COLUMNS, or nil.
+
+Cookies come from `:column-cookies' block parameter in PARAMS, a plist
+of column (as in COLUMNS: keyword like `:title', or string for blocks
+with named columns) and cookie, e.g. (:title “<30>“ :tags “<10>“).  The
+result has one element per column, nil for columns without a cookie.
+
+A column that is not in COLUMNS is an error, unless PARTIAL is non-nil
+\(for blocks whose tables have different columns)."
+  (when-let* ((spec (plist-get params :column-cookies)))
+    (unless (and (proper-list-p spec) (cl-evenp (length spec)))
+      (user-error "Om-dash: bad :column-cookies %S (expected (COLUMN \"<N>\" ...))"
+                  spec))
+    (let ((pairs (seq-partition spec 2)))
+      (dolist (pair pairs)
+        (unless (or partial (member (car pair) columns))
+          (user-error "Om-dash: :column-cookies has %S, which is not in columns %S"
+                      (car pair) columns))
+        (unless (and (stringp (cadr pair))
+                     (string-match-p om-dash--cookie-regexp (cadr pair))
+                     (not (equal (cadr pair) "<>")))
+          (user-error "Om-dash: bad cookie %S for %S (use e.g. \"<20>\", \"<r>\", \"<l10>\")"
+                      (cadr pair) (car pair))))
+      (seq-map (lambda (column) (cadr (assoc column pairs))) columns))))
+
+(defun om-dash--table-cookie-row-p (cells)
+  "Check if CELLS (texts of a table row) are a row of column cookies."
+  (and (seq-some (lambda (cell) (string-match-p om-dash--cookie-regexp cell)) cells)
+       (seq-every-p (lambda (cell)
+                      (or (s-blank-p cell) (string-match-p om-dash--cookie-regexp cell)))
+                    cells)))
+
+(defun om-dash--insert-table (column-names rows level &optional groups cookies)
   "Generate table from column names and list of rows.
 If GROUPS is non-nil, it's a list of group keys, one per row; a ruler
 is inserted between rows whose group keys differ.
-If ROWS is nil, only the header is generated, with all columns."
+If ROWS is nil, only the header is generated, with all columns.
+If COOKIES is non-nil, it's a list of org column cookies (e.g. “<20>“)
+or nil, one per column (see `om-dash--column-cookies'); a row with them
+is inserted below the column names, above the header ruler (so it's part
+of the header), so that org can shrink or align columns
+\(e.g. `org-table-toggle-column-width', “#+STARTUP: shrink“)."
   (let* (;; index of column to stretch - by default last one
          (stretch-col (1- (length column-names)))
          ;; list of pairs ("title" . length)
@@ -213,6 +255,8 @@ If ROWS is nil, only the header is generated, with all columns."
                     (seq-map (lambda (row)
                                (om-dash--remove-nth row col-num))
                              rows))
+              (when cookies
+                (setq cookies (om-dash--remove-nth cookies col-num)))
               (when (>= stretch-col col-num)
                 (setq stretch-col (1- stretch-col))))))))
     ;; adjust column widths to fit contents
@@ -235,12 +279,27 @@ If ROWS is nil, only the header is generated, with all columns."
           (let ((col (elt columns stretch-col)))
             (setcdr col (- om-dash-table-fixed-width
                            (- total-width (cdr col))))))))
+    ;; columns are at least as wide as their cookies (cookies are never
+    ;; truncated)
+    (seq-do-indexed (lambda (cookie index)
+                      (let ((col (elt columns index)))
+                        (when (and cookie (> (length cookie) (cdr col)))
+                          (setcdr col (length cookie)))))
+                    cookies)
     ;; |--------|
     (om-dash--insert-indent level)
     (om-dash--insert-ruler columns)
     ;; | header |
     (om-dash--insert-indent level)
     (om-dash--insert-header columns)
+    ;; | <20>   |
+    ;; (below column names, above the header ruler: part of the header,
+    ;; so names stay the first row of the table)
+    (when (seq-some #'identity cookies)
+      (om-dash--insert-indent level)
+      (om-dash--insert-row columns (seq-map (lambda (cookie)
+                                              (make-om-dash--cell :text (or cookie "")))
+                                            cookies)))
     ;; |--------|
     (om-dash--insert-indent level)
     (om-dash--insert-ruler columns)
@@ -342,11 +401,12 @@ go last.  Order of rows inside each group is preserved."
           (and (org-at-table-p) (org-at-table-hline-p)
                (progn (forward-line -1) (not (org-at-table-p)))))
     (user-error "Om-dash: point is on table header, not on a row"))
-  (cl-mapcar #'cons
-             (om-dash--table-header)
-             (om-dash--table-split-line
-              (buffer-substring-no-properties (line-beginning-position)
-                                              (line-end-position)))))
+  (let ((cells (om-dash--table-split-line
+                (buffer-substring-no-properties (line-beginning-position)
+                                                (line-end-position)))))
+    (when (om-dash--table-cookie-row-p cells)
+      (user-error "Om-dash: point is on the row of column cookies, not on an item"))
+    (cl-mapcar #'cons (om-dash--table-header) cells)))
 
 (defun om-dash--table-column-values (header)
   "Return distinct non-empty values of column HEADER in the table at point."
@@ -362,7 +422,10 @@ go last.  Order of rows inside each group is preserved."
                                      (buffer-substring-no-properties
                                       (line-beginning-position)
                                       (line-end-position))))))
-              (when (and (s-present-p value) (not (equal value header)))
+              (when (and (s-present-p value)
+                         (not (equal value header))
+                         ;; skip row of column cookies
+                         (not (string-match-p om-dash--cookie-regexp value)))
                 (push value values))))
           (forward-line 1)))
       (seq-uniq (nreverse values)))))

@@ -83,6 +83,12 @@ PARAMETERS OF ALL BLOCKS
                   Default: auto.
   :heading-level  Unused.
   :template       Template of `om-dash-templates' to expand.
+  :column-cookies Org column cookies, e.g. (:title “<30>“ :tags “<r>“):
+                  a row of them is added after the header, so that org can
+                  shrink or align columns (“#+STARTUP: shrink“ when the
+                  file is opened, `org-table-toggle-column-width' after a
+                  refresh).  Keys are columns of :columns (names for
+                  om-dash-command and om-dash-function).
 
 OM-DASH-GITHUB PARAMETERS
 

@@ -1487,6 +1487,9 @@ Parameters:
                          Default: auto.
   :heading-level         Unused.
                          Default: auto.
+  :column-cookies        Org column cookies, e.g. (:title “<30>“), see
+                         `om-dash--column-cookies'.
+                         Default: nil.
 
 Parameters `:any', `:open', and `:closed' define `QUERY' for topics in
 corresponding states.  You should specify either `:any' or `:open' and/or
@@ -1983,7 +1986,8 @@ parameter explicitly."
       (om-dash--insert-table column-names
                              (seq-map #'cdr table)
                              heading-level
-                             (when group-by (seq-map #'car table)))
+                             (when group-by (seq-map #'car table))
+                             (om-dash--column-cookies params table-columns))
       (om-dash--remove-empty-line))))
 
 (defun om-dash-github:milestone (params)

@@ -248,6 +248,9 @@ Parameters:
                   Default: auto.
   :heading-level  Unused.
                   Default: auto.
+  :column-cookies Org column cookies, e.g. (:title “<30>“), see
+                  `om-dash--column-cookies'.
+                  Default: nil.
 
 `:server' defines IMAP connection parameters.  It must be a `plist' which
 can have the following properties:
@@ -348,7 +351,8 @@ and `login' values to force plain-text unencrypted password."
                                    (om-dash--choose-keyword todo-p))
                                headline
                                heading-level)
-      (om-dash--insert-table column-names (nreverse table) heading-level)
+      (om-dash--insert-table column-names (nreverse table) heading-level nil
+                             (om-dash--column-cookies params table-columns))
       (om-dash--remove-empty-line))))
 
 (provide 'om-dash-imap)

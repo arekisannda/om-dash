@@ -88,14 +88,15 @@ Usage example:
   ...
   #+END:
 
-| parameter      | default  | description                             |
-|----------------+----------+-----------------------------------------|
-| :command       | required | shell command to run                    |
-| :columns       | required | column names (list of strings)          |
-| :format        | `json'   | command output format (`json' or `csv') |
-| :keyword       | auto     | keyword of OM_DASH_HEADING              |
-| :headline      | auto     | caption of multi-table blocks           |
-| :heading-level | auto     | unused                                  |
+| parameter      | default  | description                              |
+|----------------+----------+------------------------------------------|
+| :command       | required | shell command to run                     |
+| :columns       | required | column names (list of strings)           |
+| :format        | `json'   | command output format (`json' or `csv')  |
+| :keyword       | auto     | keyword of OM_DASH_HEADING               |
+| :headline      | auto     | caption of multi-table blocks            |
+| :heading-level | auto     | unused                                   |
+| :column-cookies | nil     | org column cookies, e.g. (“name“ “<20>“) |
 
 If `:format' is `json', command output should be a JSON array of
 JSON objects, which have a value for every key from `:columns'.
@@ -130,7 +131,8 @@ from https://github.com/mrc/el-csv"
       (om-dash--insert-heading (or keyword
                                    (om-dash--choose-keyword is-todo))
                                headline heading-level)
-      (om-dash--insert-table columns table heading-level)
+      (om-dash--insert-table columns table heading-level nil
+                             (om-dash--column-cookies params columns))
       (om-dash--remove-empty-line))))
 
 ;;;###autoload
@@ -155,6 +157,9 @@ Parameters:
   :headline       Caption of multi-table blocks.
                   Default: nil.
   :heading-level  Unused.
+                  Default: nil.
+  :column-cookies Org column cookies, e.g. (:title “<30>“), see
+                  `om-dash--column-cookies'.
                   Default: nil.
 
 The function should return a list of tables, where each table is
@@ -229,7 +234,8 @@ Example function that returns a single 2x2 table:
                                    heading-level)
           (when multiple
             (om-dash--insert-caption keyword headline))
-          (om-dash--insert-table column-names (nreverse table) heading-level)))
+          (om-dash--insert-table column-names (nreverse table) heading-level nil
+                                 (om-dash--column-cookies params column-names t))))
       (om-dash--remove-empty-line))))
 
 (provide 'om-dash-command)

@@ -276,6 +276,9 @@ Parameters:
                   Default: auto.
   :heading-level  Unused.
                   Default: auto.
+  :column-cookies Org column cookies, e.g. (:title “<30>“), see
+                  `om-dash--column-cookies'.
+                  Default: nil.
 
 By default, this block generates an org heading with a table for every
 top-level (i.e. level-1) org heading in specified `:file', with nested
@@ -433,7 +436,8 @@ is a format string where `%s' can be used for entry title."
           (cond
            ((eq level 1)
             (when table
-              (om-dash--insert-table column-names (nreverse table) heading-level)
+              (om-dash--insert-table column-names (nreverse table) heading-level nil
+                                     (om-dash--column-cookies params table-columns))
               (setq table nil))
             (let ((entry-keyword (or forced-keyword keyword))
                   (entry-headline (if headline
@@ -455,7 +459,8 @@ is a format string where `%s' can be used for entry title."
       ;; with :digest, the single table is generated even without entries;
       ;; without :digest, a top-level entry without rows stays collapsed
       (when (or table digest)
-        (om-dash--insert-table column-names (nreverse table) heading-level))
+        (om-dash--insert-table column-names (nreverse table) heading-level nil
+                                     (om-dash--column-cookies params table-columns)))
       (om-dash--remove-empty-line))))
 
 (provide 'om-dash-orgfile)
