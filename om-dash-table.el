@@ -342,18 +342,41 @@ of the header), so that org can shrink or align columns
                         row))
             table))
 
-(defun om-dash--sort-groups (rows order)
+(defun om-dash--sort-groups (rows order &optional natural-order)
   "Stable sort ROWS, a list of (GROUP-KEY . CELLS), by group key.
 
 ORDER is one of:
- - `asc'  - groups in alphabetical order
- - `desc' - groups in reverse alphabetical order
+ - `asc'  - groups in natural order
+ - `desc' - groups in reverse natural order
  - `sort' - groups in order of their first row (i.e. follow `:sort')
+ - list of strings - groups in this order; groups not in the list
+   follow, in natural order
+
+NATURAL-ORDER is an optional list of group keys in their natural order
+\(e.g. statuses in order of project board columns); keys not in it
+follow, compared with `string-version-lessp' (so “#9“ < “#10“).
 
 In all cases rows with empty group key (e.g. draft issues without repo)
 go last.  Order of rows inside each group is preserved."
-  (let ((first-seen (make-hash-table :test 'equal))
-        (index 0))
+  (let* ((first-seen (make-hash-table :test 'equal))
+         (index 0)
+         (explicit (when (listp order) order))
+         ;; sort value: positions in explicit and natural order (missing
+         ;; ones after present ones), then the key itself
+         (value (lambda (key)
+                  (list (or (seq-position explicit key) most-positive-fixnum)
+                        (or (seq-position natural-order key) most-positive-fixnum)
+                        key)))
+         (lessp (lambda (a b)
+                  (let ((va (funcall value a))
+                        (vb (funcall value b)))
+                    (cond ((/= (nth 0 va) (nth 0 vb)) (< (nth 0 va) (nth 0 vb)))
+                          ((/= (nth 1 va) (nth 1 vb)) (< (nth 1 va) (nth 1 vb)))
+                          (t (string-version-lessp a b)))))))
+    (unless (or (memq order '(asc desc sort))
+                (and (consp order) (seq-every-p #'stringp order)))
+      (user-error "Om-dash: bad :group-order %S (use `asc', `desc', `sort' or a list of strings)"
+                  order))
     (dolist (row rows)
       (unless (gethash (car row) first-seen)
         (puthash (car row) index first-seen))
@@ -364,12 +387,10 @@ go last.  Order of rows inside each group is preserved."
              (kb (car b)))
          (cond ((s-blank-p ka) nil)
                ((s-blank-p kb) t)
-               (t (pcase order
-                    (`asc (string< ka kb))
-                    (`desc (string< kb ka))
-                    (`sort (< (gethash ka first-seen)
-                              (gethash kb first-seen)))
-                    (_ (user-error "Om-dash: bad :group-order %S" order)))))))
+               ((eq order 'sort) (< (gethash ka first-seen)
+                                    (gethash kb first-seen)))
+               ((eq order 'desc) (funcall lessp kb ka))
+               (t (funcall lessp ka kb)))))
      rows)))
 
 ;;; Reading table rows

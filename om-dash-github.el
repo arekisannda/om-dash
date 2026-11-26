@@ -425,6 +425,9 @@ only if TABLE-COLUMNS shows them."
           (format
            (s-concat
             "projectV2(number: $number) { title url "
+            ;; options of status field, in order of board columns
+            "statusField: field(name: \"%s\") { "
+            "... on ProjectV2SingleSelectField { options { name } } } "
             "items(first: 100, after: $endCursor) { "
             "pageInfo { hasNextPage endCursor } "
             "nodes { id databaseId "
@@ -443,6 +446,7 @@ only if TABLE-COLUMNS shows them."
             "creator { login } "
             "assignees(first: 20) { nodes { login } } } "
             "} } } }")
+           (om-dash--gh-quote-arg status-field)
            (om-dash--gh-quote-arg status-field)
            common-fields
            issue-relations
@@ -672,14 +676,13 @@ TABLE-COLUMNS decides which optional fields are queried."
          (graphql (om-dash--github-project-graphql owner-type status-field
                                                    table-columns))
          (fetch-command
-          (format "gh api graphql --paginate -f %s %s-F %s | jq -s %s"
+          (format "gh api graphql --paginate -f %s %s-F %s"
                   (om-dash--shell-quote (format "query=%s" graphql))
                   (if (eq owner-type 'viewer)
                       ""
                     (format "-F %s "
                             (om-dash--shell-quote (format "owner=%s" owner))))
-                  (om-dash--shell-quote (format "number=%s" project))
-                  (om-dash--shell-quote om-dash--github-project-normalize-jq)))
+                  (om-dash--shell-quote (format "number=%s" project))))
          (gh-types (if (eq type 'any)
                        (list 'pullreq 'issue)
                      (list (om-dash--canon-type type))))
@@ -715,16 +718,34 @@ TABLE-COLUMNS decides which optional fields are queried."
                             (cons 'open open-filter)
                             (cons 'closed closed-filter))))
                    gh-types))))
+         (raw-pages (make-temp-file "om-dash-"))
          (all-items (make-temp-file "om-dash-"))
          (outputs (seq-map (lambda (_expr) (make-temp-file "om-dash-"))
-                           jq-exprs)))
+                           jq-exprs))
+         status-options)
     (unwind-protect
         (progn
           ;; fetch all project items once
           (om-dash--shell-run (format "%s > %s"
                                       fetch-command
+                                      (om-dash--shell-quote raw-pages))
+                              nil)
+          (om-dash--shell-run (format "jq -s %s %s > %s"
+                                      (om-dash--shell-quote om-dash--github-project-normalize-jq)
+                                      (om-dash--shell-quote raw-pages)
                                       (om-dash--shell-quote all-items))
                               nil)
+          ;; status options, in order of board columns (for :group-order)
+          (setq status-options
+                (append (json-read-from-string
+                         (om-dash--shell-run
+                          (format "jq -s %s %s"
+                                  (om-dash--shell-quote
+                                   (s-concat "[.[0].data | (.user // .organization // .viewer)"
+                                             " | .projectV2.statusField.options[]?.name]"))
+                                  (om-dash--shell-quote raw-pages))
+                          t))
+                        nil))
           ;; filter items for every (type, state) pair
           (seq-mapn (lambda (expr out)
                       (om-dash--shell-run
@@ -736,11 +757,37 @@ TABLE-COLUMNS decides which optional fields are queried."
                     jq-exprs
                     outputs)
           ;; merge and sort
-          (if outputs
-              (om-dash--shell-run (om-dash--jq-build-command outputs sort-by) t)
-            "[]"))
-      (dolist (file (cons all-items outputs))
+          (cons (if outputs
+                    (om-dash--shell-run (om-dash--jq-build-command outputs sort-by) t)
+                  "[]")
+                status-options))
+      (dolist (file (append (list raw-pages all-items) outputs))
         (delete-file file)))))
+
+(defun om-dash--github-status-options (owner owner-type project status-field)
+  "Return option names of STATUS-FIELD of v2 PROJECT of OWNER, in board order.
+Used for `:group-order' in repo mode (project mode gets them from its
+query).  OWNER-TYPE is as in `om-dash--github-owner-type'."
+  (let* ((owner-type (om-dash--github-owner-type owner owner-type))
+         (body (format (s-concat "projectV2(number: $number) { field(name: \"%s\") { "
+                                 "... on ProjectV2SingleSelectField { options { name } } } }")
+                       (om-dash--gh-quote-arg status-field)))
+         (query (if (eq owner-type 'viewer)
+                    (format "query($number: Int!) { viewer { %s } }" body)
+                  (format "query($owner: String!, $number: Int!) { %s(login: $owner) { %s } }"
+                          (symbol-name owner-type) body))))
+    (append (json-read-from-string
+             (om-dash--shell-run
+              (format "gh api graphql -f %s %s-F %s --jq %s"
+                      (om-dash--shell-quote (format "query=%s" query))
+                      (if (eq owner-type 'viewer)
+                          ""
+                        (format "-F %s " (om-dash--shell-quote (format "owner=%s" owner))))
+                      (om-dash--shell-quote (format "number=%s" project))
+                      (om-dash--shell-quote
+                       "[.data | (.user // .organization // .viewer) | .projectV2.field.options[]?.name]"))
+              t))
+            nil)))
 
 (defun om-dash--github-q-milestone (params)
   "Build queries for :milestone and :no-milestone."
@@ -1465,7 +1512,8 @@ Parameters:
                          Default: “createdAt“.
   :group-by              Column to group rows by, e.g. `:repo'.
                          Default: nil.
-  :group-order           Group order: `asc', `desc', or `sort'.
+  :group-order           Group order: `asc', `desc', `sort', or a list
+                         of group values (see below).
                          Default: `asc'.
   :sub-issues            `nest' sub-issues under parent, or `flat'.
                          Default: `nest'.
@@ -1644,9 +1692,18 @@ https://jqlang.github.io/jq/
 
 `:group-by' is a column symbol (any from `om-dash-github-columns', e.g.
 `:repo', `:state', `:milestone', `:author', `:project-status').  Rows are
-grouped by the value of that column (ordered by `:group-order': `asc'
-alphabetical, `desc' reverse, `sort' by first row according to `:sort';
-rows with empty value, e.g. draft issues for `:repo', go last), keeping
+grouped by the value of that column, ordered by `:group-order':
+
+  asc    Natural order: for `:project-status' the order of options of
+         the status field (board columns; in repo mode only with
+         `:project'), for `:state' OPEN, DRAFT, CLOSED, MERGED,
+         otherwise text with numbers compared as numbers (#9 < #10).
+  desc   Reverse natural order.
+  sort   Order of the first row of each group according to `:sort'.
+  LIST   Groups in this order, e.g. (“Todo“ “In Progress“ “Done“);
+         groups not in the list follow in natural order.
+
+Rows with empty value (e.g. draft issues for `:repo') go last, keeping
 `:sort' order inside each group, and a divider line is inserted between
 groups.  The column doesn't need to be displayed.  With nested
 sub-issues, each sub-issue belongs to the group of its top-level
@@ -1836,14 +1893,29 @@ parameter explicitly."
     (unless (or any-filter open-filter closed-filter)
       (setq open-filter (list "*" nil)))
     ;; build an run command
-    (let* ((raw-output (if project-mode
-                           (om-dash--github-read-project-topics
-                            owner owner-type project status-field
-                            type any-filter open-filter closed-filter
-                            sort-by limit fetch-columns)
-                         (om-dash--github-read-topics
-                          repo type any-filter open-filter closed-filter
-                          sort-by fields fetch-columns limit)))
+    (let* ((result (if project-mode
+                       (om-dash--github-read-project-topics
+                        owner owner-type project status-field
+                        type any-filter open-filter closed-filter
+                        sort-by limit fetch-columns)
+                     (cons (om-dash--github-read-topics
+                            repo type any-filter open-filter closed-filter
+                            sort-by fields fetch-columns limit)
+                           nil)))
+           (raw-output (car result))
+           ;; natural order of groups (for `asc' / `desc' :group-order)
+           (natural-order
+            (pcase group-by
+              (:state '("OPEN" "DRAFT" "CLOSED" "MERGED"))
+              (:project-status
+               (cond (project-mode (cdr result))
+                     ;; repo mode: one more request, only if needed
+                     ((and project
+                           ;; `sort' doesn't use natural order
+                           (not (eq group-order 'sort))
+                           (not (eq (plist-get params :project-type) 'classic)))
+                      (om-dash--github-status-options
+                       owner owner-type project status-field))))))
            (parsed-output (json-read-from-string raw-output))
            (column-names
             (seq-map (lambda (col)
@@ -1978,7 +2050,7 @@ parameter explicitly."
       ;; group rows: stable sort by group key, so :sort order is kept
       ;; within each group
       (when group-by
-        (setq table (om-dash--sort-groups table group-order)))
+        (setq table (om-dash--sort-groups table group-order natural-order)))
       (om-dash--insert-heading (or keyword
                                    (om-dash--choose-keyword todo-p))
                                headline heading-level)

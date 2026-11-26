@@ -111,7 +111,9 @@ OM-DASH-GITHUB PARAMETERS
   :sort                  Field to sort by, “-field“ = descending.
                          Default: “createdAt“.
   :group-by              Column to group rows by, e.g. :repo.
-  :group-order           `asc', `desc' or `sort' (first appearance).
+  :group-order           `asc' / `desc' (natural order), `sort' (first appearance), or a
+                         list like (“Todo“ “In Progress“ “Done“) that
+                         wins over natural order.
                          Default: `asc'.
   :sub-issues            `nest' under parent or `flat' (project mode).
                          Default: `nest'.
